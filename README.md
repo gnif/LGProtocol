@@ -1,8 +1,8 @@
 # LGProtocol
 
 LGProtocol is a standalone, header-only distribution of the Looking Glass
-wire protocol declarations. Its install surface contains seven portable common
-headers and one Linux-only ioctl UAPI header.
+wire protocol declarations. Its install surface contains seven portable
+protocol headers.
 
 Consumers include protocol declarations from the exported include root, for
 example:
@@ -36,12 +36,6 @@ IEEE-754 `float`. Short-enum compilation is incompatible.
 `KVMFRFrameBufferWritePointer` atomic type.
 The umbrella retains source-visible trailing arrays, so C and C++ compilers
 must accept the documented zero-length/unsized-array extensions.
-
-The Linux ioctl header is intentionally outside the common umbrella. Its
-`__u64` members follow native alignment: the create ioctl is 24 bytes on the
-supported x86-64 ABI but 20 bytes on ABIs that align `__u64` to four bytes.
-There is no compat ioctl form, so a 20-byte 32-bit command does not match the
-64-bit module command.
 
 ## License
 

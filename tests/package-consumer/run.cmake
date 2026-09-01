@@ -39,7 +39,6 @@ set(expected_headers
   LGProtocol/KVMFRStream.h
   LGProtocol/KVMFRTypes.h
   LGProtocol/LGMPConfig.h
-  linux/kvmfr.h
 )
 file(GLOB_RECURSE installed_headers
   LIST_DIRECTORIES FALSE

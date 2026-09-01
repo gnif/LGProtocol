@@ -46,10 +46,6 @@ install(FILES
   include/LGProtocol/LGMPConfig.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/LGProtocol
 )
-install(FILES
-  include/linux/kvmfr.h
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/linux
-)
 install(EXPORT LGProtocolTargets
   FILE LGProtocolTargets.cmake
   NAMESPACE LGProtocol::
@@ -146,20 +142,6 @@ if(BUILD_TESTING)
   )
   lgprotocol_enable_test_warnings(lgprotocol_abi_cxx)
   add_test(NAME abi_common_cxx COMMAND lgprotocol_abi_cxx)
-
-  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_executable(lgprotocol_abi_linux_uapi tests/abi_linux_uapi.c)
-    target_link_libraries(lgprotocol_abi_linux_uapi
-      PRIVATE LGProtocol::LGProtocol
-    )
-    set_target_properties(lgprotocol_abi_linux_uapi PROPERTIES
-      C_STANDARD          11
-      C_STANDARD_REQUIRED YES
-      C_EXTENSIONS        NO
-    )
-    lgprotocol_enable_test_warnings(lgprotocol_abi_linux_uapi)
-    add_test(NAME abi_linux_uapi COMMAND lgprotocol_abi_linux_uapi)
-  endif()
 
   add_test(NAME package_consumer
     COMMAND ${CMAKE_COMMAND}
