@@ -34,6 +34,7 @@
 
 #include "KVMFRTypes.h"
 #include "LGMPConfig.h"
+#include "KVMFRAudio.h"
 #include "KVMFRClipboard.h"
 #include "KVMFRInput.h"
 
@@ -61,7 +62,8 @@ enum
   KVMFR_FEATURE_WINDOWSIZE     = 2,
   KVMFR_FEATURE_FRAME_SCHEDULE = 4,
   KVMFR_FEATURE_INPUT          = 8,
-  KVMFR_FEATURE_CLIPBOARD      = 16
+  KVMFR_FEATURE_CLIPBOARD      = 16,
+  KVMFR_FEATURE_AUDIO          = 32
 };
 
 typedef uint32_t KVMFRMessageType;
@@ -70,7 +72,8 @@ enum
 {
   KVMFR_MESSAGE_SETCURSORPOS   = 0,
   KVMFR_MESSAGE_WINDOWSIZE     = 1,
-  KVMFR_MESSAGE_FRAME_SCHEDULE = 2
+  KVMFR_MESSAGE_FRAME_SCHEDULE = 2,
+  KVMFR_MESSAGE_AUDIO_CLAIM    = 3
 };
 
 enum

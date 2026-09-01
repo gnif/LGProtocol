@@ -38,6 +38,7 @@ install(TARGETS LGProtocol
 )
 install(FILES
   include/LGProtocol/KVMFR.h
+  include/LGProtocol/KVMFRAudio.h
   include/LGProtocol/KVMFRClipboard.h
   include/LGProtocol/KVMFRInput.h
   include/LGProtocol/KVMFRRecovery.h
@@ -70,7 +71,19 @@ install(FILES
 
 include(CTest)
 
-if(BUILD_TESTING)
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+  set(LGPROTOCOL_BUILD_TESTS_DEFAULT ${BUILD_TESTING})
+else()
+  set(LGPROTOCOL_BUILD_TESTS_DEFAULT OFF)
+endif()
+
+option(LGPROTOCOL_BUILD_TESTS
+  "Build LGProtocol validation tests"
+  ${LGPROTOCOL_BUILD_TESTS_DEFAULT}
+)
+unset(LGPROTOCOL_BUILD_TESTS_DEFAULT)
+
+if(BUILD_TESTING AND LGPROTOCOL_BUILD_TESTS)
   function(lgprotocol_enable_test_warnings target)
     if(MSVC)
       target_compile_options(${target} PRIVATE /W4 /WX)
@@ -82,6 +95,7 @@ if(BUILD_TESTING)
 
   set(LGPROTOCOL_COMMON_HEADERS
     KVMFR
+    KVMFRAudio
     KVMFRClipboard
     KVMFRInput
     KVMFRRecovery

@@ -33,6 +33,7 @@ endif()
 
 set(expected_headers
   LGProtocol/KVMFR.h
+  LGProtocol/KVMFRAudio.h
   LGProtocol/KVMFRClipboard.h
   LGProtocol/KVMFRInput.h
   LGProtocol/KVMFRRecovery.h

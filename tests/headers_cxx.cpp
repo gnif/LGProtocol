@@ -22,16 +22,18 @@
 #if LGPROTOCOL_HEADER_ID == 1
 #include <LGProtocol/KVMFR.h>
 #elif LGPROTOCOL_HEADER_ID == 2
-#include <LGProtocol/KVMFRClipboard.h>
+#include <LGProtocol/KVMFRAudio.h>
 #elif LGPROTOCOL_HEADER_ID == 3
-#include <LGProtocol/KVMFRInput.h>
+#include <LGProtocol/KVMFRClipboard.h>
 #elif LGPROTOCOL_HEADER_ID == 4
-#include <LGProtocol/KVMFRRecovery.h>
+#include <LGProtocol/KVMFRInput.h>
 #elif LGPROTOCOL_HEADER_ID == 5
-#include <LGProtocol/KVMFRStream.h>
+#include <LGProtocol/KVMFRRecovery.h>
 #elif LGPROTOCOL_HEADER_ID == 6
-#include <LGProtocol/LGMPConfig.h>
+#include <LGProtocol/KVMFRStream.h>
 #elif LGPROTOCOL_HEADER_ID == 7
+#include <LGProtocol/LGMPConfig.h>
+#elif LGPROTOCOL_HEADER_ID == 8
 #include <LGProtocol/KVMFRTypes.h>
 #else
 #error Unsupported common-header selector

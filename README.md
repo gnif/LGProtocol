@@ -1,7 +1,7 @@
 # LGProtocol
 
 LGProtocol is a standalone, header-only distribution of the Looking Glass
-wire protocol declarations. Its install surface contains seven portable
+wire protocol declarations. Its install surface contains eight portable
 protocol headers.
 
 Consumers include protocol declarations from the exported include root, for
