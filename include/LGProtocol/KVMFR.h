@@ -19,8 +19,8 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#ifndef LGPROTOCOL_COMMON_KVMFR_H
-#define LGPROTOCOL_COMMON_KVMFR_H
+#ifndef LGPROTOCOL_KVMFR_H
+#define LGPROTOCOL_KVMFR_H
 
 #include <stdint.h>
 #include <stdbool.h>

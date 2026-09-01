@@ -19,8 +19,8 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include <common/KVMFR.h>
-#include <common/KVMFRRecovery.h>
+#include <LGProtocol/KVMFR.h>
+#include <LGProtocol/KVMFRRecovery.h>
 
 #include <float.h>
 #include <limits.h>

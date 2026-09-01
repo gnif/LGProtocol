@@ -4,11 +4,11 @@ LGProtocol is a standalone, header-only distribution of the Looking Glass
 wire protocol declarations. Its install surface contains seven portable common
 headers and one Linux-only ioctl UAPI header.
 
-Consumers include common declarations from the exported include root, for
+Consumers include protocol declarations from the exported include root, for
 example:
 
 ```c
-#include <common/KVMFR.h>
+#include <LGProtocol/KVMFR.h>
 ```
 
 CMake packages expose the `LGProtocol::LGProtocol` interface target. The target

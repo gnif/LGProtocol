@@ -19,8 +19,8 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#ifndef LGPROTOCOL_COMMON_KVMFR_RECOVERY_H
-#define LGPROTOCOL_COMMON_KVMFR_RECOVERY_H
+#ifndef LGPROTOCOL_KVMFR_RECOVERY_H
+#define LGPROTOCOL_KVMFR_RECOVERY_H
 
 #include <stddef.h>
 #include <stdint.h>

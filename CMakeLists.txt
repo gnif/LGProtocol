@@ -37,14 +37,14 @@ install(TARGETS LGProtocol
   EXPORT LGProtocolTargets
 )
 install(FILES
-  include/common/KVMFR.h
-  include/common/KVMFRClipboard.h
-  include/common/KVMFRInput.h
-  include/common/KVMFRRecovery.h
-  include/common/KVMFRStream.h
-  include/common/KVMFRTypes.h
-  include/common/LGMPConfig.h
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/common
+  include/LGProtocol/KVMFR.h
+  include/LGProtocol/KVMFRClipboard.h
+  include/LGProtocol/KVMFRInput.h
+  include/LGProtocol/KVMFRRecovery.h
+  include/LGProtocol/KVMFRStream.h
+  include/LGProtocol/KVMFRTypes.h
+  include/LGProtocol/LGMPConfig.h
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/LGProtocol
 )
 install(FILES
   include/linux/kvmfr.h

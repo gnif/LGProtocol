@@ -19,8 +19,8 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#ifndef LGPROTOCOL_COMMON_LGMP_CONFIG_H
-#define LGPROTOCOL_COMMON_LGMP_CONFIG_H
+#ifndef LGPROTOCOL_LGMP_CONFIG_H
+#define LGPROTOCOL_LGMP_CONFIG_H
 
 #define LGMP_Q_POINTER          1
 #define LGMP_Q_FRAME            2

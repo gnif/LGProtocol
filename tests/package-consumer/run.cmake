@@ -32,13 +32,13 @@ if(NOT install_result EQUAL 0)
 endif()
 
 set(expected_headers
-  common/KVMFR.h
-  common/KVMFRClipboard.h
-  common/KVMFRInput.h
-  common/KVMFRRecovery.h
-  common/KVMFRStream.h
-  common/KVMFRTypes.h
-  common/LGMPConfig.h
+  LGProtocol/KVMFR.h
+  LGProtocol/KVMFRClipboard.h
+  LGProtocol/KVMFRInput.h
+  LGProtocol/KVMFRRecovery.h
+  LGProtocol/KVMFRStream.h
+  LGProtocol/KVMFRTypes.h
+  LGProtocol/LGMPConfig.h
   linux/kvmfr.h
 )
 file(GLOB_RECURSE installed_headers
