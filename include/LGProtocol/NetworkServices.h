@@ -1598,6 +1598,10 @@ enum
   LG_NET_FILE_CHUNK_FINAL = 1U << 1,
 };
 
+/* DATA_CHUNK offsets are relative to the beginning of the response, not to
+ * the file. DATA_BEGIN and DATA_END carry the request's absolute file offset.
+ * FIRST therefore identifies offset zero, while FINAL identifies the chunk
+ * ending at totalLength. */
 typedef struct LGNetFileChunk
 {
   uint64_t            requestID;
