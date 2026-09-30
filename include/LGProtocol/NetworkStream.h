@@ -32,6 +32,41 @@
 extern "C" {
 #endif
 
+/* Dedicated QUIC streams begin with this binding before carrying normal
+ * envelope-framed packets. The little-endian magic bytes spell "LGSB". */
+#define LG_NET_STREAM_BINDING_MAGIC        UINT32_C(0x4253474c)
+#define LG_NET_STREAM_BINDING_VERSION      1U
+#define LG_NET_STREAM_BINDING_WIRE_SIZE    32U
+
+typedef uint32_t LGNetStreamBindingFlags;
+
+enum
+{
+  LG_NET_STREAM_BINDING_UNIDIRECTIONAL = 1U << 0,
+  LG_NET_STREAM_BINDING_BULK           = 1U << 1,
+};
+
+typedef struct LGNetStreamBinding
+{
+  uint16_t                version;
+  uint16_t                headerSize;
+  LGNetService            service;
+  LGNetRole               originRole;
+  LGNetStreamBindingFlags flags;
+  uint64_t                streamID;
+  uint64_t                sessionEpoch;
+}
+LGNetStreamBinding;
+
+void lgNetStreamBindingInit(LGNetStreamBinding * binding,
+  LGNetService service, LGNetRole originRole, uint64_t streamID,
+  uint64_t sessionEpoch, LGNetStreamBindingFlags flags);
+bool lgNetStreamBindingValid(const LGNetStreamBinding * binding);
+bool lgNetStreamBindingEncode(void * data, size_t size,
+  const LGNetStreamBinding * binding);
+LGNetParseResult lgNetStreamBindingDecode(LGNetStreamBinding * binding,
+  const void * data, size_t size);
+
 typedef enum LGNetStreamResult
 {
   LG_NET_STREAM_PACKET,

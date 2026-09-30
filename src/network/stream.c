@@ -23,6 +23,97 @@
 
 #include <string.h>
 
+static const LGNetStreamBindingFlags STREAM_BINDING_FLAGS =
+  LG_NET_STREAM_BINDING_UNIDIRECTIONAL |
+  LG_NET_STREAM_BINDING_BULK;
+
+void lgNetStreamBindingInit(LGNetStreamBinding * binding,
+    LGNetService service, LGNetRole originRole, uint64_t streamID,
+    uint64_t sessionEpoch, LGNetStreamBindingFlags flags)
+{
+  if (!binding)
+    return;
+
+  memset(binding, 0, sizeof(*binding));
+  binding->version      = LG_NET_STREAM_BINDING_VERSION;
+  binding->headerSize   = LG_NET_STREAM_BINDING_WIRE_SIZE;
+  binding->service      = service;
+  binding->originRole   = originRole;
+  binding->flags        = flags;
+  binding->streamID     = streamID;
+  binding->sessionEpoch = sessionEpoch;
+}
+
+bool lgNetStreamBindingValid(const LGNetStreamBinding * binding)
+{
+  return binding &&
+    binding->version == LG_NET_STREAM_BINDING_VERSION &&
+    binding->headerSize == LG_NET_STREAM_BINDING_WIRE_SIZE &&
+    binding->service > LG_NET_SERVICE_CORE &&
+    binding->service <= LG_NET_SERVICE_CONTROL &&
+    (binding->originRole == LG_NET_ROLE_CLIENT ||
+      binding->originRole == LG_NET_ROLE_SERVER) &&
+    !(binding->flags & ~STREAM_BINDING_FLAGS) &&
+    (binding->flags & LG_NET_STREAM_BINDING_UNIDIRECTIONAL) &&
+    binding->streamID && binding->sessionEpoch;
+}
+
+bool lgNetStreamBindingEncode(void * data, size_t size,
+    const LGNetStreamBinding * binding)
+{
+  if (!data || size < LG_NET_STREAM_BINDING_WIRE_SIZE ||
+      !lgNetStreamBindingValid(binding))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU32(&writer, LG_NET_STREAM_BINDING_MAGIC) &&
+    lgNetWriterU16(&writer, binding->version)            &&
+    lgNetWriterU16(&writer, binding->headerSize)         &&
+    lgNetWriterU16(&writer, binding->service)            &&
+    lgNetWriterU16(&writer, binding->originRole)         &&
+    lgNetWriterU32(&writer, binding->flags)              &&
+    lgNetWriterU64(&writer, binding->streamID)           &&
+    lgNetWriterU64(&writer, binding->sessionEpoch)       &&
+    lgNetWriterSize(&writer) == LG_NET_STREAM_BINDING_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetStreamBindingDecode(LGNetStreamBinding * binding,
+    const void * data, size_t size)
+{
+  if (!binding || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_STREAM_BINDING_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+  if (size != LG_NET_STREAM_BINDING_WIRE_SIZE)
+    return LG_NET_PARSE_INVALID_LENGTH;
+
+  LGNetStreamBinding decoded;
+  LGNetReader        reader;
+  uint32_t           magic;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU32(&reader, &magic)                 ||
+      !lgNetReaderU16(&reader, &decoded.version)       ||
+      !lgNetReaderU16(&reader, &decoded.headerSize)    ||
+      !lgNetReaderU16(&reader, &decoded.service)       ||
+      !lgNetReaderU16(&reader, &decoded.originRole)    ||
+      !lgNetReaderU32(&reader, &decoded.flags)         ||
+      !lgNetReaderU64(&reader, &decoded.streamID)      ||
+      !lgNetReaderU64(&reader, &decoded.sessionEpoch)  ||
+      lgNetReaderConsumed(&reader) != LG_NET_STREAM_BINDING_WIRE_SIZE)
+    return LG_NET_PARSE_INVALID_LENGTH;
+
+  if (magic != LG_NET_STREAM_BINDING_MAGIC)
+    return LG_NET_PARSE_INVALID_MAGIC;
+  if (!lgNetStreamBindingValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *binding = decoded;
+  return LG_NET_PARSE_OK;
+}
+
 static bool parserValid(const LGNetStreamParser * parser)
 {
   return parser && parser->data &&
