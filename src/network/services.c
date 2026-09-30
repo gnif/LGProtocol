@@ -306,8 +306,7 @@ static bool coreStateKnown(LGNetCoreState state)
 
 static bool coreGuestOSKnown(LGNetCoreGuestOS os)
 {
-  return os >= LG_NET_CORE_GUEST_OS_LINUX &&
-    os <= LG_NET_CORE_GUEST_OS_OTHER;
+  return os <= LG_NET_CORE_GUEST_OS_OTHER;
 }
 
 static bool coreErrorKnown(LGNetCoreErrorCode code)
