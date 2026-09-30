@@ -41,6 +41,8 @@
 #include <LGProtocol/NetworkProtocol.h>
 #elif LGPROTOCOL_HEADER_ID == 11
 #include <LGProtocol/NetworkServices.h>
+#elif LGPROTOCOL_HEADER_ID == 12
+#include <LGProtocol/NetworkIdentity.h>
 #else
 #error Unsupported common-header selector
 #endif

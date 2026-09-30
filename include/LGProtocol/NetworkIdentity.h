@@ -19,35 +19,13 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#if LGPROTOCOL_HEADER_ID == 1
-#include <LGProtocol/KVMFR.h>
-#elif LGPROTOCOL_HEADER_ID == 2
-#include <LGProtocol/KVMFRAudio.h>
-#elif LGPROTOCOL_HEADER_ID == 3
-#include <LGProtocol/KVMFRClipboard.h>
-#elif LGPROTOCOL_HEADER_ID == 4
-#include <LGProtocol/KVMFRInput.h>
-#elif LGPROTOCOL_HEADER_ID == 5
-#include <LGProtocol/KVMFRRecovery.h>
-#elif LGPROTOCOL_HEADER_ID == 6
-#include <LGProtocol/KVMFRStream.h>
-#elif LGPROTOCOL_HEADER_ID == 7
-#include <LGProtocol/LGMPConfig.h>
-#elif LGPROTOCOL_HEADER_ID == 8
-#include <LGProtocol/KVMFRTypes.h>
-#elif LGPROTOCOL_HEADER_ID == 9
-#include <LGProtocol/NetworkWire.h>
-#elif LGPROTOCOL_HEADER_ID == 10
-#include <LGProtocol/NetworkProtocol.h>
-#elif LGPROTOCOL_HEADER_ID == 11
-#include <LGProtocol/NetworkServices.h>
-#elif LGPROTOCOL_HEADER_ID == 12
-#include <LGProtocol/NetworkIdentity.h>
-#else
-#error Unsupported common-header selector
-#endif
+#ifndef LGPROTOCOL_NETWORK_IDENTITY_H
+#define LGPROTOCOL_NETWORK_IDENTITY_H
 
-int main()
-{
-  return 0;
-}
+#define LG_NETWORK_CERTIFICATE_KEY_NAME          L"LookingGlassNetworkIdentity"
+#define LG_NETWORK_CERTIFICATE_SUBJECT           L"CN=Looking Glass Network"
+#define LG_NETWORK_CERTIFICATE_FRIENDLY_NAME     L"Looking Glass Network Identity"
+#define LG_NETWORK_CERTIFICATE_HASH_VALUE        L"NetworkCertificateHash"
+#define LG_NETWORK_CERTIFICATE_FINGERPRINT_VALUE L"NetworkCertificateFingerprint"
+
+#endif

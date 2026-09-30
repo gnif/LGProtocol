@@ -2,7 +2,8 @@
 
 LGProtocol is a standalone distribution of the Looking Glass wire protocol.
 Its install surface contains portable KVMFR and network transport protocol
-headers, plus reusable network serialization and validation codecs.
+headers, shared network identity constants, plus reusable network serialization
+and validation codecs.
 
 Consumers include protocol declarations from the exported include root, for
 example:

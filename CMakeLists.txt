@@ -19,7 +19,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-project(LGProtocol VERSION 1.2.0 LANGUAGES C CXX)
+project(LGProtocol VERSION 1.3.0 LANGUAGES C CXX)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -75,6 +75,7 @@ install(FILES
   include/LGProtocol/KVMFRStream.h
   include/LGProtocol/KVMFRTypes.h
   include/LGProtocol/LGMPConfig.h
+  include/LGProtocol/NetworkIdentity.h
   include/LGProtocol/NetworkProtocol.h
   include/LGProtocol/NetworkServices.h
   include/LGProtocol/NetworkWire.h
@@ -138,6 +139,7 @@ if(BUILD_TESTING AND LGPROTOCOL_BUILD_TESTS)
     NetworkWire
     NetworkProtocol
     NetworkServices
+    NetworkIdentity
   )
 
   set(header_id 0)
