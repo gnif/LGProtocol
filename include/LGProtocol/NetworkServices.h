@@ -32,8 +32,10 @@
 extern "C" {
 #endif
 
-/* Variable-length decoders return borrowed views into their input buffer. The
- * caller must keep that buffer alive while using the decoded payload. */
+/* Variable-length decoders with pointer fields return borrowed views into
+ * their input buffer. The caller must keep that buffer alive while using the
+ * decoded payload. Fixed-capacity arrays, such as per-channel volume, are
+ * copied into the decoded structure. */
 
 /* Fixed boundaries must not move when a service's current version changes. */
 #define LG_NET_VIDEO_PYROWAVE_INTRODUCED_SERVICE_VERSION  1U
@@ -43,22 +45,33 @@ extern "C" {
 #define LG_NET_CLIPBOARD_CHUNK_INTRODUCED_SERVICE_VERSION 1U
 #define LG_NET_FILE_CHUNK_INTRODUCED_SERVICE_VERSION      1U
 #define LG_NET_USB_RESERVED_INTRODUCED_SERVICE_VERSION    1U
+#define LG_NET_VIDEO_BLOCK_FRAGMENTATION_INTRODUCED_SERVICE_VERSION \
+  2U
 
-#define LG_NET_VIDEO_MAX_WIDTH                    32768U
-#define LG_NET_VIDEO_MAX_HEIGHT                   32768U
+#define LG_NET_VIDEO_MAX_WIDTH                    16384U
+#define LG_NET_VIDEO_MAX_HEIGHT                   16384U
 #define LG_NET_VIDEO_MAX_PLANES                   4U
 #define LG_NET_VIDEO_STREAM_CONFIG_WIRE_SIZE      60U
-#define LG_NET_VIDEO_FRAME_HEADER_WIRE_SIZE       56U
-#define LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE    40U
+#define LG_NET_VIDEO_FRAME_HEADER_WIRE_SIZE       60U
+#define LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE    72U
 #define LG_NET_VIDEO_FEEDBACK_WIRE_SIZE           56U
 #define LG_NET_VIDEO_MAX_FRAME_LENGTH             \
   (LG_NET_MAX_PAYLOAD_LENGTH - LG_NET_VIDEO_FRAME_HEADER_WIRE_SIZE)
 #define LG_NET_VIDEO_MAX_FRAGMENT_LENGTH          65535U
-#define LG_NET_VIDEO_MAX_FRAGMENTS                65535U
-#define LG_NET_VIDEO_MAX_BLOCKS                   65535U
+#define LG_NET_VIDEO_MAX_FRAGMENTS                1048576U
+#define LG_NET_VIDEO_MAX_BLOCKS                   1048576U
+
+#define LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_INITIAL 1U
+#define LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_CURRENT 1U
+#define LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_MIN     \
+  LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_INITIAL
+#define LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_MAX     \
+  LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_CURRENT
 
 #define LG_NET_CURSOR_MAX_WIDTH                   4096U
 #define LG_NET_CURSOR_MAX_HEIGHT                  4096U
+#define LG_NET_CURSOR_MAX_DESKTOP_WIDTH           32768U
+#define LG_NET_CURSOR_MAX_DESKTOP_HEIGHT          32768U
 #define LG_NET_CURSOR_MAX_SHAPE_LENGTH            (16U * 1024U * 1024U)
 #define LG_NET_CURSOR_POSITION_WIRE_SIZE          40U
 #define LG_NET_CURSOR_SHAPE_HEADER_WIRE_SIZE      40U
@@ -72,6 +85,7 @@ extern "C" {
 #define LG_NET_INPUT_ABSOLUTE_MAX_WIDTH           32768U
 #define LG_NET_INPUT_ABSOLUTE_MAX_HEIGHT          32768U
 #define LG_NET_INPUT_KEYBOARD_MODIFIER_MASK       UINT32_C(0x000000FF)
+#define LG_NET_INPUT_MAX_LEASE_MS                 10000U
 
 #define LG_NET_AUDIO_MAX_CHANNELS                 32U
 #define LG_NET_AUDIO_MAX_SAMPLE_RATE              768000U
@@ -106,6 +120,228 @@ extern "C" {
 #define LG_NET_USB_MAX_RESERVED_PAYLOAD_LENGTH    \
   (LG_NET_MAX_PAYLOAD_LENGTH - LG_NET_USB_RESERVED_HEADER_WIRE_SIZE)
 
+#define LG_NET_CORE_MAX_NAME_LENGTH               255U
+#define LG_NET_CORE_MAX_ERROR_TEXT_LENGTH         4096U
+#define LG_NET_CORE_SESSION_INFO_HEADER_WIRE_SIZE 48U
+#define LG_NET_CORE_STATUS_WIRE_SIZE              40U
+#define LG_NET_CORE_ERROR_HEADER_WIRE_SIZE        32U
+
+#define LG_NET_RECOVERY_MAX_VERSION_LENGTH        255U
+#define LG_NET_RECOVERY_MAX_TIMEOUT_MS            120000U
+#define LG_NET_RECOVERY_INFO_HEADER_WIRE_SIZE     48U
+#define LG_NET_RECOVERY_REQUEST_WIRE_SIZE         32U
+#define LG_NET_RECOVERY_STATUS_WIRE_SIZE          40U
+
+#define LG_NET_VIDEO_SUBSCRIBE_WIRE_SIZE          32U
+#define LG_NET_VIDEO_CONTROL_WIRE_SIZE            24U
+#define LG_NET_VIDEO_SCHEDULE_WIRE_SIZE           48U
+#define LG_NET_VIDEO_STATUS_WIRE_SIZE             40U
+
+#define LG_NET_CURSOR_STATE_WIRE_SIZE             40U
+#define LG_NET_CURSOR_TRANSFORM_WIRE_SIZE         48U
+#define LG_NET_CURSOR_STATUS_WIRE_SIZE            40U
+
+#define LG_NET_INPUT_CONTROL_WIRE_SIZE            32U
+#define LG_NET_POINTER_BUTTON_MASK                UINT32_MAX
+
+#define LG_NET_AUDIO_SUBSCRIBE_WIRE_SIZE          24U
+#define LG_NET_AUDIO_CONTROL_WIRE_SIZE            32U
+#define LG_NET_AUDIO_VOLUME_HEADER_WIRE_SIZE      24U
+#define LG_NET_AUDIO_MUTE_WIRE_SIZE               24U
+#define LG_NET_AUDIO_BARRIER_WIRE_SIZE            24U
+#define LG_NET_AUDIO_VOLUME_MIN_MILLIBELS         (-9600)
+#define LG_NET_AUDIO_VOLUME_MAX_MILLIBELS         1200
+
+#define LG_NET_CLIPBOARD_CONTROL_WIRE_SIZE        32U
+#define LG_NET_CLIPBOARD_TRANSFER_WIRE_SIZE       32U
+#define LG_NET_CLIPBOARD_CLAIM_STATUS_WIRE_SIZE   32U
+#define LG_NET_CLIPBOARD_MAX_LEASE_MS             60000U
+
+#define LG_NET_FILE_LEASE_WIRE_SIZE               32U
+#define LG_NET_FILE_TRANSFER_WIRE_SIZE            48U
+#define LG_NET_FILE_MAX_LEASE_MS                  300000U
+
+typedef uint32_t LGNetCoreSessionFlags;
+
+enum
+{
+  LG_NET_CORE_SESSION_AUTHENTICATED     = 1U << 0,
+  LG_NET_CORE_SESSION_PASSWORD_REQUIRED = 1U << 1,
+  LG_NET_CORE_SESSION_MULTI_CLIENT      = 1U << 2,
+};
+
+/* LG_NET_CORE_MESSAGE_SESSION_INFO. The name is UTF-8 without a trailing
+ * NUL; decoders return it as a borrowed view into the input buffer. */
+typedef struct LGNetCoreSessionInfo
+{
+  uint64_t              sessionID;
+  uint64_t              connectedAtNs;
+  uint64_t              serverTimeNs;
+  uint32_t              clientID;
+  uint32_t              activeClients;
+  uint32_t              maxClients;
+  LGNetCoreSessionFlags flags;
+  uint16_t              nameLength;
+  const uint8_t *       name;
+}
+LGNetCoreSessionInfo;
+
+typedef uint32_t LGNetCoreState;
+
+enum
+{
+  LG_NET_CORE_STATE_READY    = 1,
+  LG_NET_CORE_STATE_DEGRADED = 2,
+  LG_NET_CORE_STATE_STOPPING = 3,
+  LG_NET_CORE_STATE_ERROR    = 4,
+};
+
+typedef uint32_t LGNetCoreStatusFlags;
+
+enum
+{
+  LG_NET_CORE_STATUS_VIDEO_AVAILABLE     = 1U << 0,
+  LG_NET_CORE_STATUS_INPUT_AVAILABLE     = 1U << 1,
+  LG_NET_CORE_STATUS_AUDIO_AVAILABLE     = 1U << 2,
+  LG_NET_CORE_STATUS_CLIPBOARD_AVAILABLE = 1U << 3,
+  LG_NET_CORE_STATUS_FILE_AVAILABLE      = 1U << 4,
+  LG_NET_CORE_STATUS_CURSOR_AVAILABLE    = 1U << 5,
+  LG_NET_CORE_STATUS_RECOVERY_AVAILABLE  = 1U << 6,
+};
+
+/* LG_NET_CORE_MESSAGE_STATUS. */
+typedef struct LGNetCoreStatus
+{
+  uint64_t             sessionID;
+  uint64_t             statusSequence;
+  uint64_t             uptimeNs;
+  LGNetCoreState       state;
+  uint32_t             activeClients;
+  LGNetCoreStatusFlags flags;
+  uint32_t             detail;
+}
+LGNetCoreStatus;
+
+typedef uint32_t LGNetCoreErrorCode;
+
+enum
+{
+  LG_NET_CORE_ERROR_INVALID_REQUEST = 1,
+  LG_NET_CORE_ERROR_UNAUTHORIZED    = 2,
+  LG_NET_CORE_ERROR_UNSUPPORTED     = 3,
+  LG_NET_CORE_ERROR_BUSY            = 4,
+  LG_NET_CORE_ERROR_TIMEOUT         = 5,
+  LG_NET_CORE_ERROR_PROTOCOL        = 6,
+  LG_NET_CORE_ERROR_INTERNAL        = 7,
+};
+
+/* LG_NET_CORE_MESSAGE_ERROR. text is UTF-8 without a trailing NUL. */
+typedef struct LGNetCoreError
+{
+  uint64_t           requestID;
+  LGNetCoreErrorCode code;
+  LGNetService       service;
+  uint16_t           messageType;
+  uint32_t           detail;
+  uint32_t           retryAfterMs;
+  uint16_t           textLength;
+  const uint8_t *    text;
+}
+LGNetCoreError;
+
+typedef uint32_t LGNetRecoveryCapabilities;
+
+enum
+{
+  LG_NET_RECOVERY_CAP_DISPLAY = 1U << 0,
+};
+
+typedef uint32_t LGNetRecoveryState;
+
+enum
+{
+  LG_NET_RECOVERY_STATE_UNKNOWN   = 0,
+  LG_NET_RECOVERY_STATE_NORMAL    = 1,
+  LG_NET_RECOVERY_STATE_SWITCHING = 2,
+  LG_NET_RECOVERY_STATE_ACTIVE    = 3,
+  LG_NET_RECOVERY_STATE_FAILED    = 4,
+};
+
+typedef uint32_t LGNetRecoveryError;
+
+enum
+{
+  LG_NET_RECOVERY_ERROR_NONE                = 0,
+  LG_NET_RECOVERY_ERROR_UNSUPPORTED         = 1,
+  LG_NET_RECOVERY_ERROR_HELPER_UNAVAILABLE  = 2,
+  LG_NET_RECOVERY_ERROR_TOPOLOGY_FAILED     = 3,
+  LG_NET_RECOVERY_ERROR_NO_FALLBACK_DISPLAY = 4,
+  LG_NET_RECOVERY_ERROR_BUSY                = 5,
+  LG_NET_RECOVERY_ERROR_CAPACITY            = 6,
+  LG_NET_RECOVERY_ERROR_TIMEOUT             = 7,
+};
+
+typedef uint32_t LGNetRecoveryFlags;
+
+enum
+{
+  LG_NET_RECOVERY_SUPPORTED        = 1U << 0,
+  LG_NET_RECOVERY_ACTIVE           = 1U << 1,
+  LG_NET_RECOVERY_HELPER_AVAILABLE = 1U << 2,
+  LG_NET_RECOVERY_DISPLAY_PRESENT  = 1U << 3,
+};
+
+/* LG_NET_RECOVERY_MESSAGE_GET_INFO has a zero-length payload.
+ * LG_NET_RECOVERY_MESSAGE_INFO uses the payload below; version is UTF-8
+ * without a trailing NUL. */
+typedef struct LGNetRecoveryInfo
+{
+  uint64_t                  sessionID;
+  uint64_t                  statusSequence;
+  LGNetRecoveryCapabilities capabilities;
+  LGNetRecoveryState        state;
+  LGNetRecoveryError        error;
+  LGNetRecoveryFlags        flags;
+  uint32_t                  maxTransitionMs;
+  uint16_t                  versionLength;
+  const uint8_t *           version;
+}
+LGNetRecoveryInfo;
+
+typedef uint32_t LGNetRecoveryRequestFlags;
+
+enum
+{
+  LG_NET_RECOVERY_REQUEST_ACTIVE = 1U << 0,
+  LG_NET_RECOVERY_REQUEST_FORCE  = 1U << 1,
+};
+
+/* LG_NET_RECOVERY_MESSAGE_REQUEST. ACTIVE selects recovery mode; clearing it
+ * requests a return to normal mode. */
+typedef struct LGNetRecoveryRequest
+{
+  uint64_t                  requestID;
+  uint64_t                  sessionID;
+  uint64_t                  expectedStatusSequence;
+  uint32_t                  timeoutMs;
+  LGNetRecoveryRequestFlags flags;
+}
+LGNetRecoveryRequest;
+
+/* LG_NET_RECOVERY_MESSAGE_STATUS. A zero requestID identifies an unsolicited
+ * state update. */
+typedef struct LGNetRecoveryStatus
+{
+  uint64_t           requestID;
+  uint64_t           sessionID;
+  uint64_t           statusSequence;
+  LGNetRecoveryState state;
+  LGNetRecoveryError error;
+  LGNetRecoveryFlags flags;
+  uint32_t           detail;
+}
+LGNetRecoveryStatus;
+
 typedef uint16_t LGNetVideoCodec;
 
 enum
@@ -115,14 +351,14 @@ enum
 
 typedef uint16_t LGNetVideoPixelFormat;
 
+/* Values 5 and 6 remain reserved. The PyroWave profile supports 4:2:0 and
+ * 4:4:4 chroma only. */
 enum
 {
   LG_NET_VIDEO_PIXEL_FORMAT_NV12       = 1,
   LG_NET_VIDEO_PIXEL_FORMAT_P010       = 2,
   LG_NET_VIDEO_PIXEL_FORMAT_YUV420P8   = 3,
   LG_NET_VIDEO_PIXEL_FORMAT_YUV420P10  = 4,
-  LG_NET_VIDEO_PIXEL_FORMAT_YUV422P8   = 5,
-  LG_NET_VIDEO_PIXEL_FORMAT_YUV422P10  = 6,
   LG_NET_VIDEO_PIXEL_FORMAT_YUV444P8   = 7,
   LG_NET_VIDEO_PIXEL_FORMAT_YUV444P10  = 8,
   LG_NET_VIDEO_PIXEL_FORMAT_YUV444P16F = 9,
@@ -130,10 +366,10 @@ enum
 
 typedef uint8_t LGNetVideoChromaSubsampling;
 
+/* Value 2 remains reserved for a future codec profile. */
 enum
 {
   LG_NET_VIDEO_CHROMA_420 = 1,
-  LG_NET_VIDEO_CHROMA_422 = 2,
   LG_NET_VIDEO_CHROMA_444 = 3,
 };
 
@@ -175,14 +411,61 @@ enum
   LG_NET_COLOR_RANGE_FULL    = 2,
 };
 
+typedef uint16_t LGNetVideoSubscribeFlags;
+
+enum
+{
+  LG_NET_VIDEO_SUBSCRIBE_ALLOW_DATAGRAMS = 1U << 0,
+  LG_NET_VIDEO_SUBSCRIBE_REQUIRE_HDR     = 1U << 1,
+  LG_NET_VIDEO_SUBSCRIBE_LOW_LATENCY     = 1U << 2,
+};
+
+/* LG_NET_VIDEO_MESSAGE_SUBSCRIBE. A zero preferredCodec permits any codec
+ * negotiated for the video service. */
+typedef struct LGNetVideoSubscribe
+{
+  uint64_t                 subscriptionID;
+  LGNetVideoCodec          preferredCodec;
+  LGNetVideoSubscribeFlags flags;
+  uint32_t                 maxWidth;
+  uint32_t                 maxHeight;
+  uint32_t                 maxFrameLength;
+  uint32_t                 maxFrameLatencyMs;
+  uint32_t                 maxFrameRate;
+}
+LGNetVideoSubscribe;
+
+typedef uint32_t LGNetVideoControlReason;
+
+enum
+{
+  LG_NET_VIDEO_CONTROL_USER        = 1,
+  LG_NET_VIDEO_CONTROL_RECOVERY    = 2,
+  LG_NET_VIDEO_CONTROL_STALLED     = 3,
+  LG_NET_VIDEO_CONTROL_CORRUPT     = 4,
+  LG_NET_VIDEO_CONTROL_RECONFIGURE = 5,
+};
+
+/* LG_NET_VIDEO_MESSAGE_UNSUBSCRIBE and
+ * LG_NET_VIDEO_MESSAGE_KEYFRAME_REQUEST. configEpoch and frameID may be zero
+ * when the request does not target a particular configuration or frame. */
+typedef struct LGNetVideoControl
+{
+  uint32_t                streamID;
+  LGNetVideoControlReason reason;
+  uint64_t                configEpoch;
+  uint64_t                frameID;
+}
+LGNetVideoControl;
+
 typedef uint16_t LGNetVideoStreamFlags;
 
 enum
 {
-  LG_NET_VIDEO_STREAM_HDR             = 1U << 0,
-  LG_NET_VIDEO_STREAM_ALPHA           = 1U << 1,
-  LG_NET_VIDEO_STREAM_GPU_PLANES_ONLY = 1U << 2,
-  LG_NET_VIDEO_STREAM_DATAGRAMS       = 1U << 3,
+  LG_NET_VIDEO_STREAM_HDR              = 1U << 0,
+  LG_NET_VIDEO_STREAM_RESERVED_ALPHA   = 1U << 1,
+  LG_NET_VIDEO_STREAM_GPU_PLANES_ONLY  = 1U << 2,
+  LG_NET_VIDEO_STREAM_DATAGRAMS        = 1U << 3,
 };
 
 typedef struct LGNetVideoStreamConfig
@@ -233,8 +516,8 @@ typedef struct LGNetVideoFrame
   uint64_t             captureTimestampNs;
   uint64_t             presentationTimestampNs;
   uint32_t             encodedLength;
-  uint16_t             blockCount;
-  uint16_t             fragmentCount;
+  uint32_t             blockCount;
+  uint32_t             fragmentCount;
   uint32_t             deadlineMs;
   uint32_t             checksum;
   const uint8_t *      data;
@@ -249,21 +532,46 @@ enum
   LG_NET_VIDEO_FRAGMENT_BLOCK_END   = 1U << 1,
   LG_NET_VIDEO_FRAGMENT_FRAME_END   = 1U << 2,
   LG_NET_VIDEO_FRAGMENT_RECOVERY    = 1U << 3,
+  LG_NET_VIDEO_FRAGMENT_CHECKSUM    = 1U << 4,
 };
 
+typedef uint16_t LGNetVideoRecoveryType;
+
+enum
+{
+  LG_NET_VIDEO_RECOVERY_NONE            = 0,
+  LG_NET_VIDEO_RECOVERY_DUPLICATE       = 1,
+  LG_NET_VIDEO_RECOVERY_RESERVED_PARITY = 2,
+};
+
+/* One encoded codec block may span multiple fragments. frameOffset locates
+ * payload in the complete encoded frame while blockOffset locates the same
+ * bytes within blockIndex. Version 2 supports exact duplicate recovery
+ * fragments only; the parity value is reserved for a future wire version.
+ * recoveryType and recoveryGroup are non-zero for recovery fragments;
+ * recoveryIndex/recoveryCount identify that fragment's position in the
+ * recovery group. checksum is CRC-32C over payloadLength bytes and is zero
+ * unless LG_NET_VIDEO_FRAGMENT_CHECKSUM is set. */
 typedef struct LGNetVideoFragment
 {
   uint32_t                streamID;
+  LGNetVideoFragmentFlags flags;
+  LGNetVideoRecoveryType  recoveryType;
   uint64_t                configEpoch;
   uint64_t                frameID;
+  uint32_t                frameOffset;
   uint32_t                frameLength;
-  uint32_t                offset;
-  uint16_t                fragmentIndex;
-  uint16_t                fragmentCount;
-  uint16_t                blockIndex;
-  uint16_t                blockCount;
-  uint16_t                payloadLength;
-  LGNetVideoFragmentFlags flags;
+  uint32_t                blockIndex;
+  uint32_t                blockOffset;
+  uint32_t                blockLength;
+  uint32_t                blockCount;
+  uint32_t                fragmentIndex;
+  uint32_t                fragmentCount;
+  uint32_t                recoveryGroup;
+  uint16_t                recoveryIndex;
+  uint16_t                recoveryCount;
+  uint32_t                payloadLength;
+  uint32_t                checksum;
   const uint8_t *         payload;
 }
 LGNetVideoFragment;
@@ -291,6 +599,64 @@ typedef struct LGNetVideoFeedback
   uint32_t                roundTripUs;
 }
 LGNetVideoFeedback;
+
+typedef uint32_t LGNetVideoScheduleFlags;
+
+enum
+{
+  LG_NET_VIDEO_SCHEDULE_PRESENT          = 1U << 0,
+  LG_NET_VIDEO_SCHEDULE_DROP_IF_LATE     = 1U << 1,
+  LG_NET_VIDEO_SCHEDULE_REPEAT_PREVIOUS  = 1U << 2,
+  LG_NET_VIDEO_SCHEDULE_REQUEST_KEYFRAME = 1U << 3,
+};
+
+/* LG_NET_VIDEO_MESSAGE_SCHEDULE. deadlineTimestampNs is the latest useful
+ * arrival time in the sender's timestamp domain. */
+typedef struct LGNetVideoSchedule
+{
+  uint32_t                streamID;
+  LGNetVideoScheduleFlags flags;
+  uint64_t                configEpoch;
+  uint64_t                frameID;
+  uint64_t                captureTimestampNs;
+  uint64_t                presentationTimestampNs;
+  uint64_t                deadlineTimestampNs;
+}
+LGNetVideoSchedule;
+
+typedef uint16_t LGNetVideoState;
+
+enum
+{
+  LG_NET_VIDEO_STATE_SUBSCRIBED = 1,
+  LG_NET_VIDEO_STATE_CONFIGURED = 2,
+  LG_NET_VIDEO_STATE_STREAMING  = 3,
+  LG_NET_VIDEO_STATE_STALLED    = 4,
+  LG_NET_VIDEO_STATE_STOPPED    = 5,
+  LG_NET_VIDEO_STATE_ERROR      = 6,
+};
+
+typedef uint32_t LGNetVideoStatusFlags;
+
+enum
+{
+  LG_NET_VIDEO_STATUS_KEYFRAME_PENDING = 1U << 0,
+  LG_NET_VIDEO_STATUS_CONGESTED        = 1U << 1,
+  LG_NET_VIDEO_STATUS_RECONFIGURING    = 1U << 2,
+};
+
+/* LG_NET_VIDEO_MESSAGE_STATUS. */
+typedef struct LGNetVideoStatus
+{
+  uint32_t              streamID;
+  LGNetVideoState       state;
+  uint64_t              configEpoch;
+  uint64_t              lastFrameID;
+  uint64_t              statusSequence;
+  LGNetVideoStatusFlags flags;
+  uint32_t              detail;
+}
+LGNetVideoStatus;
 
 typedef uint32_t LGNetCursorPositionFlags;
 
@@ -347,6 +713,88 @@ typedef struct LGNetCursorShape
 }
 LGNetCursorShape;
 
+typedef uint32_t LGNetCursorStateFlags;
+
+enum
+{
+  LG_NET_CURSOR_STATE_VISIBLE         = 1U << 0,
+  LG_NET_CURSOR_STATE_SHAPE_VALID     = 1U << 1,
+  LG_NET_CURSOR_STATE_POSITION_VALID  = 1U << 2,
+  LG_NET_CURSOR_STATE_TRANSFORM_VALID = 1U << 3,
+};
+
+/* LG_NET_CURSOR_MESSAGE_STATE. Each referenced ID is zero when its matching
+ * valid flag is clear. */
+typedef struct LGNetCursorState
+{
+  uint64_t              stateSequence;
+  uint64_t              shapeID;
+  uint64_t              positionID;
+  uint64_t              transformID;
+  LGNetCursorStateFlags flags;
+  uint32_t              displayID;
+}
+LGNetCursorState;
+
+typedef uint16_t LGNetCursorRotation;
+
+enum
+{
+  LG_NET_CURSOR_ROTATION_0   = 1,
+  LG_NET_CURSOR_ROTATION_90  = 2,
+  LG_NET_CURSOR_ROTATION_180 = 3,
+  LG_NET_CURSOR_ROTATION_270 = 4,
+};
+
+typedef uint16_t LGNetCursorTransformFlags;
+
+enum
+{
+  LG_NET_CURSOR_TRANSFORM_MIRROR_X = 1U << 0,
+  LG_NET_CURSOR_TRANSFORM_MIRROR_Y = 1U << 1,
+};
+
+/* LG_NET_CURSOR_MESSAGE_TRANSFORM. scaleNumerator/scaleDenominator applies
+ * after rotation and before the signed target-space offset. */
+typedef struct LGNetCursorTransform
+{
+  uint64_t                  transformID;
+  uint32_t                  displayID;
+  LGNetCursorRotation       rotation;
+  LGNetCursorTransformFlags flags;
+  uint32_t                  sourceWidth;
+  uint32_t                  sourceHeight;
+  uint32_t                  targetWidth;
+  uint32_t                  targetHeight;
+  int32_t                   offsetX;
+  int32_t                   offsetY;
+  uint32_t                  scaleNumerator;
+  uint32_t                  scaleDenominator;
+}
+LGNetCursorTransform;
+
+typedef uint32_t LGNetCursorStatusCode;
+
+enum
+{
+  LG_NET_CURSOR_STATUS_APPLIED     = 1,
+  LG_NET_CURSOR_STATUS_UNSUPPORTED = 2,
+  LG_NET_CURSOR_STATUS_INVALID     = 3,
+  LG_NET_CURSOR_STATUS_ERROR       = 4,
+};
+
+/* LG_NET_CURSOR_MESSAGE_STATUS. */
+typedef struct LGNetCursorStatus
+{
+  uint64_t              stateSequence;
+  uint64_t              appliedShapeID;
+  uint64_t              appliedPositionID;
+  uint64_t              appliedTransformID;
+  LGNetCursorStatusCode status;
+  uint32_t              detail;
+}
+LGNetCursorStatus;
+
 typedef uint32_t LGNetInputClaimFlags;
 
 enum
@@ -377,6 +825,7 @@ enum
   LG_NET_INPUT_STATUS_ERROR       = 6,
 };
 
+/* LG_NET_INPUT_MESSAGE_CLAIM_RESULT and LG_NET_INPUT_MESSAGE_STATUS. */
 typedef struct LGNetInputStatus
 {
   uint64_t             claimEpoch;
@@ -397,8 +846,51 @@ enum
   LG_NET_POINTER_BUTTON_MIDDLE  = 1U << 2,
   LG_NET_POINTER_BUTTON_BACK    = 1U << 3,
   LG_NET_POINTER_BUTTON_FORWARD = 1U << 4,
+  LG_NET_POINTER_BUTTON_6       = 1U << 5,
+  LG_NET_POINTER_BUTTON_7       = 1U << 6,
+  LG_NET_POINTER_BUTTON_8       = 1U << 7,
+  LG_NET_POINTER_BUTTON_9       = 1U << 8,
+  LG_NET_POINTER_BUTTON_10      = 1U << 9,
+  LG_NET_POINTER_BUTTON_11      = 1U << 10,
+  LG_NET_POINTER_BUTTON_12      = 1U << 11,
+  LG_NET_POINTER_BUTTON_13      = 1U << 12,
+  LG_NET_POINTER_BUTTON_14      = 1U << 13,
+  LG_NET_POINTER_BUTTON_15      = 1U << 14,
+  LG_NET_POINTER_BUTTON_16      = 1U << 15,
+  LG_NET_POINTER_BUTTON_17      = 1U << 16,
+  LG_NET_POINTER_BUTTON_18      = 1U << 17,
+  LG_NET_POINTER_BUTTON_19      = 1U << 18,
+  LG_NET_POINTER_BUTTON_20      = 1U << 19,
+  LG_NET_POINTER_BUTTON_21      = 1U << 20,
+  LG_NET_POINTER_BUTTON_22      = 1U << 21,
+  LG_NET_POINTER_BUTTON_23      = 1U << 22,
+  LG_NET_POINTER_BUTTON_24      = 1U << 23,
+  LG_NET_POINTER_BUTTON_25      = 1U << 24,
+  LG_NET_POINTER_BUTTON_26      = 1U << 25,
+  LG_NET_POINTER_BUTTON_27      = 1U << 26,
+  LG_NET_POINTER_BUTTON_28      = 1U << 27,
+  LG_NET_POINTER_BUTTON_29      = 1U << 28,
+  LG_NET_POINTER_BUTTON_30      = 1U << 29,
+  LG_NET_POINTER_BUTTON_31      = 1U << 30,
+  LG_NET_POINTER_BUTTON_32      = 1U << 31,
 };
 
+/* LG_NET_INPUT_MESSAGE_KEEPALIVE, LG_NET_INPUT_MESSAGE_RELEASE and
+ * LG_NET_INPUT_MESSAGE_RESET. For RESET, flags identifies the input classes
+ * whose held state must be cleared. */
+typedef struct LGNetInputControl
+{
+  uint64_t             claimantID;
+  uint64_t             claimEpoch;
+  uint64_t             sequence;
+  LGNetInputClaimFlags flags;
+  uint32_t             leaseMs;
+}
+LGNetInputControl;
+
+/* Mouse payloads carry the complete post-event button state in buttons and
+ * the transition mask in changedButtons, including button-only events where
+ * every motion and wheel field is zero. */
 typedef struct LGNetInputRelative
 {
   uint64_t            sequence;
@@ -462,6 +954,8 @@ enum
   LG_NET_KEYBOARD_LED_KANA        = 1U << 4,
 };
 
+/* LG_NET_INPUT_MESSAGE_KEYBOARD_LEDS. validMask identifies the LEDs whose
+ * state is authoritative in this update. */
 typedef struct LGNetInputLEDs
 {
   uint64_t          sequence;
@@ -477,6 +971,33 @@ enum
   LG_NET_AUDIO_DIRECTION_PLAYBACK = 1,
   LG_NET_AUDIO_DIRECTION_CAPTURE  = 2,
 };
+
+typedef uint32_t LGNetAudioDirectionMask;
+
+enum
+{
+  LG_NET_AUDIO_DIRECTIONS_PLAYBACK = 1U << 0,
+  LG_NET_AUDIO_DIRECTIONS_CAPTURE  = 1U << 1,
+};
+
+typedef uint32_t LGNetAudioSubscribeFlags;
+
+enum
+{
+  LG_NET_AUDIO_SUBSCRIBE_LOW_LATENCY = 1U << 0,
+  LG_NET_AUDIO_SUBSCRIBE_EXCLUSIVE   = 1U << 1,
+};
+
+/* LG_NET_AUDIO_MESSAGE_SUBSCRIBE. */
+typedef struct LGNetAudioSubscribe
+{
+  uint64_t                 subscriberID;
+  LGNetAudioDirectionMask  directions;
+  uint32_t                 targetLatencyUs;
+  uint32_t                 maxPacketFrames;
+  LGNetAudioSubscribeFlags flags;
+}
+LGNetAudioSubscribe;
 
 typedef uint16_t LGNetAudioSampleFormat;
 
@@ -577,6 +1098,67 @@ typedef struct LGNetAudioClockFeedback
 }
 LGNetAudioClockFeedback;
 
+typedef uint16_t LGNetAudioControlFlags;
+
+enum
+{
+  LG_NET_AUDIO_CONTROL_GRACEFUL = 1U << 0,
+  LG_NET_AUDIO_CONTROL_FLUSH    = 1U << 1,
+};
+
+/* LG_NET_AUDIO_MESSAGE_PLAYBACK_STOP, LG_NET_AUDIO_MESSAGE_CAPTURE_STOP,
+ * LG_NET_AUDIO_MESSAGE_KEEPALIVE and LG_NET_AUDIO_MESSAGE_RELEASE. The start
+ * messages use LGNetAudioFormat as their payload. */
+typedef struct LGNetAudioControl
+{
+  uint32_t               streamID;
+  LGNetAudioDirection    direction;
+  LGNetAudioControlFlags flags;
+  uint64_t               sequence;
+  uint64_t               formatEpoch;
+  uint32_t               detail;
+}
+LGNetAudioControl;
+
+/* LG_NET_AUDIO_MESSAGE_PLAYBACK_VOLUME and
+ * LG_NET_AUDIO_MESSAGE_CAPTURE_VOLUME. Values are signed millibels. A zero
+ * channelMask means the first channelCount channels in stream order; a
+ * non-zero mask must contain exactly channelCount bits and values follow its
+ * set bits in ascending bit order. */
+typedef struct LGNetAudioVolume
+{
+  uint32_t            streamID;
+  LGNetAudioDirection direction;
+  uint16_t            channelCount;
+  uint64_t            sequence;
+  uint32_t            channelMask;
+  int32_t             volumeMillibels[LG_NET_AUDIO_MAX_CHANNELS];
+}
+LGNetAudioVolume;
+
+/* LG_NET_AUDIO_MESSAGE_PLAYBACK_MUTE and
+ * LG_NET_AUDIO_MESSAGE_CAPTURE_MUTE. A zero channelMask selects the master
+ * mute control; otherwise each set bit selects an affected channel. */
+typedef struct LGNetAudioMute
+{
+  uint32_t            streamID;
+  LGNetAudioDirection direction;
+  uint8_t             muted;
+  uint64_t            sequence;
+  uint32_t            channelMask;
+}
+LGNetAudioMute;
+
+/* LG_NET_AUDIO_MESSAGE_STATE_BARRIER and LG_NET_AUDIO_MESSAGE_STATE_ACK. */
+typedef struct LGNetAudioBarrier
+{
+  uint32_t            streamID;
+  LGNetAudioDirection direction;
+  uint64_t            barrierID;
+  uint64_t            stateSequence;
+}
+LGNetAudioBarrier;
+
 typedef uint32_t LGNetClipboardClaimFlags;
 
 enum
@@ -593,6 +1175,41 @@ typedef struct LGNetClipboardClaim
   LGNetClipboardClaimFlags flags;
 }
 LGNetClipboardClaim;
+
+/* LG_NET_CLIPBOARD_MESSAGE_KEEPALIVE, LG_NET_CLIPBOARD_MESSAGE_RELEASE and
+ * LG_NET_CLIPBOARD_MESSAGE_CLEAR. A zero offerID clears all offers owned by
+ * this claim; otherwise it targets one offer. */
+typedef struct LGNetClipboardControl
+{
+  uint64_t ownerID;
+  uint64_t claimEpoch;
+  uint64_t serial;
+  uint64_t offerID;
+}
+LGNetClipboardControl;
+
+typedef uint32_t LGNetClipboardClaimCode;
+
+enum
+{
+  LG_NET_CLIPBOARD_CLAIM_ACCEPTED = 1,
+  LG_NET_CLIPBOARD_CLAIM_REJECTED = 2,
+  LG_NET_CLIPBOARD_CLAIM_RELEASED = 3,
+  LG_NET_CLIPBOARD_CLAIM_EXPIRED  = 4,
+  LG_NET_CLIPBOARD_CLAIM_ERROR    = 5,
+};
+
+/* LG_NET_CLIPBOARD_MESSAGE_CLAIM_RESULT. */
+typedef struct LGNetClipboardClaimStatus
+{
+  uint64_t                 claimEpoch;
+  uint64_t                 serial;
+  LGNetClipboardClaimCode  status;
+  LGNetClipboardClaimFlags flags;
+  uint32_t                 leaseRemainingMs;
+  uint32_t                 detail;
+}
+LGNetClipboardClaimStatus;
 
 typedef uint16_t LGNetClipboardOfferFlags;
 
@@ -645,6 +1262,18 @@ typedef struct LGNetClipboardChunk
 }
 LGNetClipboardChunk;
 
+/* LG_NET_CLIPBOARD_MESSAGE_DATA_BEGIN, DATA_END, DATA_READY and CANCEL.
+ * processedLength is zero for BEGIN/READY and contains the terminal byte
+ * count for END/CANCEL. */
+typedef struct LGNetClipboardTransfer
+{
+  uint64_t requestID;
+  uint64_t offerID;
+  uint64_t totalLength;
+  uint64_t processedLength;
+}
+LGNetClipboardTransfer;
+
 typedef uint32_t LGNetClipboardStatusCode;
 
 enum
@@ -686,6 +1315,28 @@ typedef struct LGNetFileOffer
   const uint8_t *     label;
 }
 LGNetFileOffer;
+
+typedef uint32_t LGNetFileLeaseFlags;
+
+enum
+{
+  LG_NET_FILE_LEASE_READ      = 1U << 0,
+  LG_NET_FILE_LEASE_EXCLUSIVE = 1U << 1,
+  LG_NET_FILE_LEASE_ACQUIRED  = 1U << 2,
+};
+
+/* LG_NET_FILE_MESSAGE_ACQUIRE, ACQUIRED and RELEASE. ACQUIRE sets the desired
+ * lease flags, ACQUIRED adds LG_NET_FILE_LEASE_ACQUIRED, and RELEASE carries
+ * the previously issued leaseEpoch. */
+typedef struct LGNetFileLease
+{
+  uint64_t            clientID;
+  uint64_t            offerID;
+  uint64_t            leaseEpoch;
+  uint32_t            leaseMs;
+  LGNetFileLeaseFlags flags;
+}
+LGNetFileLease;
 
 typedef uint16_t LGNetFileEntryType;
 
@@ -766,6 +1417,19 @@ typedef struct LGNetFileChunk
 }
 LGNetFileChunk;
 
+/* LG_NET_FILE_MESSAGE_DATA_BEGIN, DATA_END, DATA_READY and CANCEL.
+ * processedLength is relative to offset and must fit within totalLength. */
+typedef struct LGNetFileTransfer
+{
+  uint64_t requestID;
+  uint64_t offerID;
+  uint64_t entryID;
+  uint64_t offset;
+  uint64_t totalLength;
+  uint64_t processedLength;
+}
+LGNetFileTransfer;
+
 typedef uint32_t LGNetFileStatusCode;
 
 enum
@@ -779,6 +1443,7 @@ enum
   LG_NET_FILE_STATUS_ERROR       = 7,
 };
 
+/* An entryID of zero identifies an offer-level ACQUIRE or RELEASE status. */
 typedef struct LGNetFileStatus
 {
   uint64_t            requestID;
@@ -813,6 +1478,57 @@ typedef struct LGNetUSBReserved
 }
 LGNetUSBReserved;
 
+size_t lgNetCoreSessionInfoSize(const LGNetCoreSessionInfo * info);
+bool lgNetCoreSessionInfoValid(const LGNetCoreSessionInfo * info);
+bool lgNetCoreSessionInfoEncode(
+  void * data, size_t size, const LGNetCoreSessionInfo * info);
+LGNetParseResult lgNetCoreSessionInfoDecode(
+  LGNetCoreSessionInfo * info, const void * data, size_t size);
+
+bool lgNetCoreStatusValid(const LGNetCoreStatus * status);
+bool lgNetCoreStatusEncode(
+  void * data, size_t size, const LGNetCoreStatus * status);
+LGNetParseResult lgNetCoreStatusDecode(
+  LGNetCoreStatus * status, const void * data, size_t size);
+
+size_t lgNetCoreErrorSize(const LGNetCoreError * error);
+bool lgNetCoreErrorValid(const LGNetCoreError * error);
+bool lgNetCoreErrorEncode(
+  void * data, size_t size, const LGNetCoreError * error);
+LGNetParseResult lgNetCoreErrorDecode(
+  LGNetCoreError * error, const void * data, size_t size);
+
+size_t lgNetRecoveryInfoSize(const LGNetRecoveryInfo * info);
+bool lgNetRecoveryInfoValid(const LGNetRecoveryInfo * info);
+bool lgNetRecoveryInfoEncode(
+  void * data, size_t size, const LGNetRecoveryInfo * info);
+LGNetParseResult lgNetRecoveryInfoDecode(
+  LGNetRecoveryInfo * info, const void * data, size_t size);
+
+bool lgNetRecoveryRequestValid(const LGNetRecoveryRequest * request);
+bool lgNetRecoveryRequestEncode(
+  void * data, size_t size, const LGNetRecoveryRequest * request);
+LGNetParseResult lgNetRecoveryRequestDecode(
+  LGNetRecoveryRequest * request, const void * data, size_t size);
+
+bool lgNetRecoveryStatusValid(const LGNetRecoveryStatus * status);
+bool lgNetRecoveryStatusEncode(
+  void * data, size_t size, const LGNetRecoveryStatus * status);
+LGNetParseResult lgNetRecoveryStatusDecode(
+  LGNetRecoveryStatus * status, const void * data, size_t size);
+
+bool lgNetVideoSubscribeValid(const LGNetVideoSubscribe * subscribe);
+bool lgNetVideoSubscribeEncode(
+  void * data, size_t size, const LGNetVideoSubscribe * subscribe);
+LGNetParseResult lgNetVideoSubscribeDecode(
+  LGNetVideoSubscribe * subscribe, const void * data, size_t size);
+
+bool lgNetVideoControlValid(const LGNetVideoControl * control);
+bool lgNetVideoControlEncode(
+  void * data, size_t size, const LGNetVideoControl * control);
+LGNetParseResult lgNetVideoControlDecode(
+  LGNetVideoControl * control, const void * data, size_t size);
+
 bool lgNetVideoStreamConfigValid(const LGNetVideoStreamConfig * config);
 bool lgNetVideoStreamConfigEncode(void * data, size_t size,
   const LGNetVideoStreamConfig * config);
@@ -839,6 +1555,18 @@ bool lgNetVideoFeedbackEncode(
 LGNetParseResult lgNetVideoFeedbackDecode(
   LGNetVideoFeedback * feedback, const void * data, size_t size);
 
+bool lgNetVideoScheduleValid(const LGNetVideoSchedule * schedule);
+bool lgNetVideoScheduleEncode(
+  void * data, size_t size, const LGNetVideoSchedule * schedule);
+LGNetParseResult lgNetVideoScheduleDecode(
+  LGNetVideoSchedule * schedule, const void * data, size_t size);
+
+bool lgNetVideoStatusValid(const LGNetVideoStatus * status);
+bool lgNetVideoStatusEncode(
+  void * data, size_t size, const LGNetVideoStatus * status);
+LGNetParseResult lgNetVideoStatusDecode(
+  LGNetVideoStatus * status, const void * data, size_t size);
+
 bool lgNetCursorPositionValid(const LGNetCursorPosition * position);
 bool lgNetCursorPositionEncode(
   void * data, size_t size, const LGNetCursorPosition * position);
@@ -852,6 +1580,24 @@ bool lgNetCursorShapeEncode(
 LGNetParseResult lgNetCursorShapeDecode(
   LGNetCursorShape * shape, const void * data, size_t size);
 
+bool lgNetCursorStateValid(const LGNetCursorState * state);
+bool lgNetCursorStateEncode(
+  void * data, size_t size, const LGNetCursorState * state);
+LGNetParseResult lgNetCursorStateDecode(
+  LGNetCursorState * state, const void * data, size_t size);
+
+bool lgNetCursorTransformValid(const LGNetCursorTransform * transform);
+bool lgNetCursorTransformEncode(
+  void * data, size_t size, const LGNetCursorTransform * transform);
+LGNetParseResult lgNetCursorTransformDecode(
+  LGNetCursorTransform * transform, const void * data, size_t size);
+
+bool lgNetCursorStatusValid(const LGNetCursorStatus * status);
+bool lgNetCursorStatusEncode(
+  void * data, size_t size, const LGNetCursorStatus * status);
+LGNetParseResult lgNetCursorStatusDecode(
+  LGNetCursorStatus * status, const void * data, size_t size);
+
 bool lgNetInputClaimValid(const LGNetInputClaim * claim);
 bool lgNetInputClaimEncode(
   void * data, size_t size, const LGNetInputClaim * claim);
@@ -863,6 +1609,12 @@ bool lgNetInputStatusEncode(
   void * data, size_t size, const LGNetInputStatus * status);
 LGNetParseResult lgNetInputStatusDecode(
   LGNetInputStatus * status, const void * data, size_t size);
+
+bool lgNetInputControlValid(const LGNetInputControl * control);
+bool lgNetInputControlEncode(
+  void * data, size_t size, const LGNetInputControl * control);
+LGNetParseResult lgNetInputControlDecode(
+  LGNetInputControl * control, const void * data, size_t size);
 
 bool lgNetInputRelativeValid(const LGNetInputRelative * relative);
 bool lgNetInputRelativeEncode(
@@ -887,6 +1639,12 @@ bool lgNetInputLEDsEncode(
   void * data, size_t size, const LGNetInputLEDs * leds);
 LGNetParseResult lgNetInputLEDsDecode(
   LGNetInputLEDs * leds, const void * data, size_t size);
+
+bool lgNetAudioSubscribeValid(const LGNetAudioSubscribe * subscribe);
+bool lgNetAudioSubscribeEncode(
+  void * data, size_t size, const LGNetAudioSubscribe * subscribe);
+LGNetParseResult lgNetAudioSubscribeDecode(
+  LGNetAudioSubscribe * subscribe, const void * data, size_t size);
 
 bool lgNetAudioFormatValid(const LGNetAudioFormat * format);
 bool lgNetAudioFormatEncode(
@@ -916,11 +1674,49 @@ bool lgNetAudioClockFeedbackEncode(void * data, size_t size,
 LGNetParseResult lgNetAudioClockFeedbackDecode(
   LGNetAudioClockFeedback * feedback, const void * data, size_t size);
 
+bool lgNetAudioControlValid(const LGNetAudioControl * control);
+bool lgNetAudioControlEncode(
+  void * data, size_t size, const LGNetAudioControl * control);
+LGNetParseResult lgNetAudioControlDecode(
+  LGNetAudioControl * control, const void * data, size_t size);
+
+size_t lgNetAudioVolumeSize(const LGNetAudioVolume * volume);
+bool lgNetAudioVolumeValid(const LGNetAudioVolume * volume);
+bool lgNetAudioVolumeEncode(
+  void * data, size_t size, const LGNetAudioVolume * volume);
+LGNetParseResult lgNetAudioVolumeDecode(
+  LGNetAudioVolume * volume, const void * data, size_t size);
+
+bool lgNetAudioMuteValid(const LGNetAudioMute * mute);
+bool lgNetAudioMuteEncode(
+  void * data, size_t size, const LGNetAudioMute * mute);
+LGNetParseResult lgNetAudioMuteDecode(
+  LGNetAudioMute * mute, const void * data, size_t size);
+
+bool lgNetAudioBarrierValid(const LGNetAudioBarrier * barrier);
+bool lgNetAudioBarrierEncode(
+  void * data, size_t size, const LGNetAudioBarrier * barrier);
+LGNetParseResult lgNetAudioBarrierDecode(
+  LGNetAudioBarrier * barrier, const void * data, size_t size);
+
 bool lgNetClipboardClaimValid(const LGNetClipboardClaim * claim);
 bool lgNetClipboardClaimEncode(
   void * data, size_t size, const LGNetClipboardClaim * claim);
 LGNetParseResult lgNetClipboardClaimDecode(
   LGNetClipboardClaim * claim, const void * data, size_t size);
+
+bool lgNetClipboardControlValid(const LGNetClipboardControl * control);
+bool lgNetClipboardControlEncode(
+  void * data, size_t size, const LGNetClipboardControl * control);
+LGNetParseResult lgNetClipboardControlDecode(
+  LGNetClipboardControl * control, const void * data, size_t size);
+
+bool lgNetClipboardClaimStatusValid(
+  const LGNetClipboardClaimStatus * status);
+bool lgNetClipboardClaimStatusEncode(
+  void * data, size_t size, const LGNetClipboardClaimStatus * status);
+LGNetParseResult lgNetClipboardClaimStatusDecode(
+  LGNetClipboardClaimStatus * status, const void * data, size_t size);
 
 size_t lgNetClipboardOfferSize(const LGNetClipboardOffer * offer);
 bool lgNetClipboardOfferValid(const LGNetClipboardOffer * offer);
@@ -942,6 +1738,12 @@ bool lgNetClipboardChunkEncode(
 LGNetParseResult lgNetClipboardChunkDecode(
   LGNetClipboardChunk * chunk, const void * data, size_t size);
 
+bool lgNetClipboardTransferValid(const LGNetClipboardTransfer * transfer);
+bool lgNetClipboardTransferEncode(
+  void * data, size_t size, const LGNetClipboardTransfer * transfer);
+LGNetParseResult lgNetClipboardTransferDecode(
+  LGNetClipboardTransfer * transfer, const void * data, size_t size);
+
 bool lgNetClipboardStatusValid(const LGNetClipboardStatus * status);
 bool lgNetClipboardStatusEncode(
   void * data, size_t size, const LGNetClipboardStatus * status);
@@ -954,6 +1756,12 @@ bool lgNetFileOfferEncode(
   void * data, size_t size, const LGNetFileOffer * offer);
 LGNetParseResult lgNetFileOfferDecode(
   LGNetFileOffer * offer, const void * data, size_t size);
+
+bool lgNetFileLeaseValid(const LGNetFileLease * lease);
+bool lgNetFileLeaseEncode(
+  void * data, size_t size, const LGNetFileLease * lease);
+LGNetParseResult lgNetFileLeaseDecode(
+  LGNetFileLease * lease, const void * data, size_t size);
 
 size_t lgNetFileEntrySize(const LGNetFileEntry * entry);
 bool lgNetFileEntryValid(const LGNetFileEntry * entry);
@@ -974,6 +1782,12 @@ bool lgNetFileChunkEncode(
   void * data, size_t size, const LGNetFileChunk * chunk);
 LGNetParseResult lgNetFileChunkDecode(
   LGNetFileChunk * chunk, const void * data, size_t size);
+
+bool lgNetFileTransferValid(const LGNetFileTransfer * transfer);
+bool lgNetFileTransferEncode(
+  void * data, size_t size, const LGNetFileTransfer * transfer);
+LGNetParseResult lgNetFileTransferDecode(
+  LGNetFileTransfer * transfer, const void * data, size_t size);
 
 bool lgNetFileStatusValid(const LGNetFileStatus * status);
 bool lgNetFileStatusEncode(

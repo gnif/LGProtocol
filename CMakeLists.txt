@@ -19,7 +19,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-project(LGProtocol VERSION 1.3.0 LANGUAGES C CXX)
+project(LGProtocol VERSION 1.4.0 LANGUAGES C CXX)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)

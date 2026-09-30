@@ -26,7 +26,6 @@
 
 static const LGNetVideoStreamFlags VIDEO_STREAM_FLAGS =
   LG_NET_VIDEO_STREAM_HDR             |
-  LG_NET_VIDEO_STREAM_ALPHA           |
   LG_NET_VIDEO_STREAM_GPU_PLANES_ONLY |
   LG_NET_VIDEO_STREAM_DATAGRAMS;
 
@@ -40,7 +39,8 @@ static const LGNetVideoFragmentFlags VIDEO_FRAGMENT_FLAGS =
   LG_NET_VIDEO_FRAGMENT_BLOCK_START |
   LG_NET_VIDEO_FRAGMENT_BLOCK_END   |
   LG_NET_VIDEO_FRAGMENT_FRAME_END   |
-  LG_NET_VIDEO_FRAGMENT_RECOVERY;
+  LG_NET_VIDEO_FRAGMENT_RECOVERY    |
+  LG_NET_VIDEO_FRAGMENT_CHECKSUM;
 
 static const LGNetVideoFeedbackFlags VIDEO_FEEDBACK_FLAGS =
   LG_NET_VIDEO_FEEDBACK_REQUEST_KEYFRAME |
@@ -118,6 +118,76 @@ static const LGNetUSBReservedFlags USB_RESERVED_FLAGS =
   LG_NET_USB_RESERVED_RESPONSE |
   LG_NET_USB_RESERVED_FINAL;
 
+static const LGNetCoreSessionFlags CORE_SESSION_FLAGS =
+  LG_NET_CORE_SESSION_AUTHENTICATED     |
+  LG_NET_CORE_SESSION_PASSWORD_REQUIRED |
+  LG_NET_CORE_SESSION_MULTI_CLIENT;
+
+static const LGNetCoreStatusFlags CORE_STATUS_FLAGS =
+  LG_NET_CORE_STATUS_VIDEO_AVAILABLE     |
+  LG_NET_CORE_STATUS_INPUT_AVAILABLE     |
+  LG_NET_CORE_STATUS_AUDIO_AVAILABLE     |
+  LG_NET_CORE_STATUS_CLIPBOARD_AVAILABLE |
+  LG_NET_CORE_STATUS_FILE_AVAILABLE      |
+  LG_NET_CORE_STATUS_CURSOR_AVAILABLE    |
+  LG_NET_CORE_STATUS_RECOVERY_AVAILABLE;
+
+static const LGNetRecoveryCapabilities RECOVERY_CAPABILITIES =
+  LG_NET_RECOVERY_CAP_DISPLAY;
+
+static const LGNetRecoveryFlags RECOVERY_FLAGS =
+  LG_NET_RECOVERY_SUPPORTED        |
+  LG_NET_RECOVERY_ACTIVE           |
+  LG_NET_RECOVERY_HELPER_AVAILABLE |
+  LG_NET_RECOVERY_DISPLAY_PRESENT;
+
+static const LGNetRecoveryRequestFlags RECOVERY_REQUEST_FLAGS =
+  LG_NET_RECOVERY_REQUEST_ACTIVE |
+  LG_NET_RECOVERY_REQUEST_FORCE;
+
+static const LGNetVideoSubscribeFlags VIDEO_SUBSCRIBE_FLAGS =
+  LG_NET_VIDEO_SUBSCRIBE_ALLOW_DATAGRAMS |
+  LG_NET_VIDEO_SUBSCRIBE_REQUIRE_HDR     |
+  LG_NET_VIDEO_SUBSCRIBE_LOW_LATENCY;
+
+static const LGNetVideoScheduleFlags VIDEO_SCHEDULE_FLAGS =
+  LG_NET_VIDEO_SCHEDULE_PRESENT          |
+  LG_NET_VIDEO_SCHEDULE_DROP_IF_LATE     |
+  LG_NET_VIDEO_SCHEDULE_REPEAT_PREVIOUS  |
+  LG_NET_VIDEO_SCHEDULE_REQUEST_KEYFRAME;
+
+static const LGNetVideoStatusFlags VIDEO_STATUS_FLAGS =
+  LG_NET_VIDEO_STATUS_KEYFRAME_PENDING |
+  LG_NET_VIDEO_STATUS_CONGESTED        |
+  LG_NET_VIDEO_STATUS_RECONFIGURING;
+
+static const LGNetCursorStateFlags CURSOR_STATE_FLAGS =
+  LG_NET_CURSOR_STATE_VISIBLE         |
+  LG_NET_CURSOR_STATE_SHAPE_VALID     |
+  LG_NET_CURSOR_STATE_POSITION_VALID  |
+  LG_NET_CURSOR_STATE_TRANSFORM_VALID;
+
+static const LGNetCursorTransformFlags CURSOR_TRANSFORM_FLAGS =
+  LG_NET_CURSOR_TRANSFORM_MIRROR_X |
+  LG_NET_CURSOR_TRANSFORM_MIRROR_Y;
+
+static const LGNetAudioDirectionMask AUDIO_DIRECTIONS =
+  LG_NET_AUDIO_DIRECTIONS_PLAYBACK |
+  LG_NET_AUDIO_DIRECTIONS_CAPTURE;
+
+static const LGNetAudioSubscribeFlags AUDIO_SUBSCRIBE_FLAGS =
+  LG_NET_AUDIO_SUBSCRIBE_LOW_LATENCY |
+  LG_NET_AUDIO_SUBSCRIBE_EXCLUSIVE;
+
+static const LGNetAudioControlFlags AUDIO_CONTROL_FLAGS =
+  LG_NET_AUDIO_CONTROL_GRACEFUL |
+  LG_NET_AUDIO_CONTROL_FLUSH;
+
+static const LGNetFileLeaseFlags FILE_LEASE_FLAGS =
+  LG_NET_FILE_LEASE_READ      |
+  LG_NET_FILE_LEASE_EXCLUSIVE |
+  LG_NET_FILE_LEASE_ACQUIRED;
+
 static bool variableSize(size_t headerSize, size_t payloadLength,
     size_t payloadLimit, size_t * wireSize)
 {
@@ -128,6 +198,17 @@ static bool variableSize(size_t headerSize, size_t payloadLength,
 
   *wireSize = headerSize + payloadLength;
   return true;
+}
+
+static uint16_t bitCount32(uint32_t value)
+{
+  uint16_t count = 0;
+  while (value)
+  {
+    count += (uint16_t)(value & 1U);
+    value >>= 1;
+  }
+  return count;
 }
 
 static LGNetParseResult fixedDecodeResult(
@@ -153,6 +234,456 @@ static LGNetParseResult variableDecodeSize(size_t headerSize,
   return LG_NET_PARSE_OK;
 }
 
+static bool coreStateKnown(LGNetCoreState state)
+{
+  return state >= LG_NET_CORE_STATE_READY &&
+    state <= LG_NET_CORE_STATE_ERROR;
+}
+
+static bool coreErrorKnown(LGNetCoreErrorCode code)
+{
+  return code >= LG_NET_CORE_ERROR_INVALID_REQUEST &&
+    code <= LG_NET_CORE_ERROR_INTERNAL;
+}
+
+static bool serviceKnown(LGNetService service)
+{
+  return service >= LG_NET_SERVICE_CORE && service <= LG_NET_SERVICE_USB;
+}
+
+size_t lgNetCoreSessionInfoSize(const LGNetCoreSessionInfo * info)
+{
+  size_t size;
+  return info && variableSize(LG_NET_CORE_SESSION_INFO_HEADER_WIRE_SIZE,
+    info->nameLength, LG_NET_CORE_MAX_NAME_LENGTH, &size) ? size : 0;
+}
+
+bool lgNetCoreSessionInfoValid(const LGNetCoreSessionInfo * info)
+{
+  return info && info->sessionID && info->serverTimeNs && info->clientID &&
+    info->maxClients && info->activeClients &&
+    info->activeClients <= info->maxClients &&
+    !(info->flags & ~CORE_SESSION_FLAGS) &&
+    info->nameLength <= LG_NET_CORE_MAX_NAME_LENGTH &&
+    (!info->nameLength || info->name);
+}
+
+bool lgNetCoreSessionInfoEncode(
+    void * data, size_t size, const LGNetCoreSessionInfo * info)
+{
+  const size_t needed = lgNetCoreSessionInfoSize(info);
+  if (!data || !needed || size < needed || !lgNetCoreSessionInfoValid(info))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64  (&writer, info->sessionID)       &&
+    lgNetWriterU64  (&writer, info->connectedAtNs)   &&
+    lgNetWriterU64  (&writer, info->serverTimeNs)    &&
+    lgNetWriterU32  (&writer, info->clientID)        &&
+    lgNetWriterU32  (&writer, info->activeClients)   &&
+    lgNetWriterU32  (&writer, info->maxClients)      &&
+    lgNetWriterU32  (&writer, info->flags)           &&
+    lgNetWriterU16  (&writer, info->nameLength)      &&
+    lgNetWriterZero (&writer, 6)                     &&
+    lgNetWriterBytes(&writer, info->name, info->nameLength) &&
+    lgNetWriterSize (&writer) == needed;
+}
+
+LGNetParseResult lgNetCoreSessionInfoDecode(
+    LGNetCoreSessionInfo * info, const void * data, size_t size)
+{
+  if (!info || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CORE_SESSION_INFO_HEADER_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetCoreSessionInfo decoded;
+  LGNetReader          reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64 (&reader, &decoded.sessionID)       ||
+      !lgNetReaderU64 (&reader, &decoded.connectedAtNs)   ||
+      !lgNetReaderU64 (&reader, &decoded.serverTimeNs)    ||
+      !lgNetReaderU32 (&reader, &decoded.clientID)        ||
+      !lgNetReaderU32 (&reader, &decoded.activeClients)   ||
+      !lgNetReaderU32 (&reader, &decoded.maxClients)      ||
+      !lgNetReaderU32 (&reader, &decoded.flags)           ||
+      !lgNetReaderU16 (&reader, &decoded.nameLength)      ||
+      !lgNetReaderZero(&reader, 6))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  size_t                 expected;
+  const LGNetParseResult result = variableDecodeSize(
+    LG_NET_CORE_SESSION_INFO_HEADER_WIRE_SIZE, decoded.nameLength,
+    LG_NET_CORE_MAX_NAME_LENGTH, size, &expected);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetReaderView(&reader, &decoded.name, decoded.nameLength) ||
+      lgNetReaderConsumed(&reader) != expected)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (!lgNetCoreSessionInfoValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *info = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+bool lgNetCoreStatusValid(const LGNetCoreStatus * status)
+{
+  return status && status->sessionID && status->statusSequence &&
+    coreStateKnown(status->state) && !(status->flags & ~CORE_STATUS_FLAGS);
+}
+
+bool lgNetCoreStatusEncode(
+    void * data, size_t size, const LGNetCoreStatus * status)
+{
+  if (!data || size < LG_NET_CORE_STATUS_WIRE_SIZE ||
+      !lgNetCoreStatusValid(status))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, status->sessionID)      &&
+    lgNetWriterU64(&writer, status->statusSequence) &&
+    lgNetWriterU64(&writer, status->uptimeNs)       &&
+    lgNetWriterU32(&writer, status->state)          &&
+    lgNetWriterU32(&writer, status->activeClients)  &&
+    lgNetWriterU32(&writer, status->flags)          &&
+    lgNetWriterU32(&writer, status->detail)         &&
+    lgNetWriterSize(&writer) == LG_NET_CORE_STATUS_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetCoreStatusDecode(
+    LGNetCoreStatus * status, const void * data, size_t size)
+{
+  if (!status || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CORE_STATUS_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetCoreStatus decoded;
+  LGNetReader     reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.sessionID)      ||
+      !lgNetReaderU64(&reader, &decoded.statusSequence) ||
+      !lgNetReaderU64(&reader, &decoded.uptimeNs)       ||
+      !lgNetReaderU32(&reader, &decoded.state)          ||
+      !lgNetReaderU32(&reader, &decoded.activeClients)  ||
+      !lgNetReaderU32(&reader, &decoded.flags)          ||
+      !lgNetReaderU32(&reader, &decoded.detail))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_CORE_STATUS_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetCoreStatusValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *status = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+size_t lgNetCoreErrorSize(const LGNetCoreError * error)
+{
+  size_t size;
+  return error && variableSize(LG_NET_CORE_ERROR_HEADER_WIRE_SIZE,
+    error->textLength, LG_NET_CORE_MAX_ERROR_TEXT_LENGTH, &size) ? size : 0;
+}
+
+bool lgNetCoreErrorValid(const LGNetCoreError * error)
+{
+  return error && coreErrorKnown(error->code) && serviceKnown(error->service) &&
+    error->messageType &&
+    error->textLength <= LG_NET_CORE_MAX_ERROR_TEXT_LENGTH &&
+    (!error->textLength || error->text);
+}
+
+bool lgNetCoreErrorEncode(
+    void * data, size_t size, const LGNetCoreError * error)
+{
+  const size_t needed = lgNetCoreErrorSize(error);
+  if (!data || !needed || size < needed || !lgNetCoreErrorValid(error))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64  (&writer, error->requestID)       &&
+    lgNetWriterU32  (&writer, error->code)            &&
+    lgNetWriterU16  (&writer, error->service)         &&
+    lgNetWriterU16  (&writer, error->messageType)     &&
+    lgNetWriterU32  (&writer, error->detail)          &&
+    lgNetWriterU32  (&writer, error->retryAfterMs)    &&
+    lgNetWriterU16  (&writer, error->textLength)      &&
+    lgNetWriterZero (&writer, 6)                      &&
+    lgNetWriterBytes(&writer, error->text, error->textLength) &&
+    lgNetWriterSize (&writer) == needed;
+}
+
+LGNetParseResult lgNetCoreErrorDecode(
+    LGNetCoreError * error, const void * data, size_t size)
+{
+  if (!error || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CORE_ERROR_HEADER_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetCoreError decoded;
+  LGNetReader    reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64 (&reader, &decoded.requestID)    ||
+      !lgNetReaderU32 (&reader, &decoded.code)         ||
+      !lgNetReaderU16 (&reader, &decoded.service)      ||
+      !lgNetReaderU16 (&reader, &decoded.messageType)  ||
+      !lgNetReaderU32 (&reader, &decoded.detail)       ||
+      !lgNetReaderU32 (&reader, &decoded.retryAfterMs) ||
+      !lgNetReaderU16 (&reader, &decoded.textLength)   ||
+      !lgNetReaderZero(&reader, 6))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  size_t                 expected;
+  const LGNetParseResult result = variableDecodeSize(
+    LG_NET_CORE_ERROR_HEADER_WIRE_SIZE, decoded.textLength,
+    LG_NET_CORE_MAX_ERROR_TEXT_LENGTH, size, &expected);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetReaderView(&reader, &decoded.text, decoded.textLength) ||
+      lgNetReaderConsumed(&reader) != expected)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (!lgNetCoreErrorValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *error = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+static bool recoveryStateKnown(LGNetRecoveryState state)
+{
+  return state <= LG_NET_RECOVERY_STATE_FAILED;
+}
+
+static bool recoveryErrorKnown(LGNetRecoveryError error)
+{
+  return error <= LG_NET_RECOVERY_ERROR_TIMEOUT;
+}
+
+static bool recoveryStateErrorValid(
+    LGNetRecoveryState state, LGNetRecoveryError error)
+{
+  return recoveryStateKnown(state) && recoveryErrorKnown(error) &&
+    ((state == LG_NET_RECOVERY_STATE_FAILED) ==
+      (error != LG_NET_RECOVERY_ERROR_NONE));
+}
+
+size_t lgNetRecoveryInfoSize(const LGNetRecoveryInfo * info)
+{
+  size_t size;
+  return info && variableSize(LG_NET_RECOVERY_INFO_HEADER_WIRE_SIZE,
+    info->versionLength, LG_NET_RECOVERY_MAX_VERSION_LENGTH, &size) ? size : 0;
+}
+
+bool lgNetRecoveryInfoValid(const LGNetRecoveryInfo * info)
+{
+  return info && info->sessionID && info->statusSequence &&
+    !(info->capabilities & ~RECOVERY_CAPABILITIES) &&
+    recoveryStateErrorValid(info->state, info->error) &&
+    !(info->flags & ~RECOVERY_FLAGS) &&
+    (!(info->flags & LG_NET_RECOVERY_ACTIVE) ||
+      info->state == LG_NET_RECOVERY_STATE_ACTIVE ||
+      info->state == LG_NET_RECOVERY_STATE_SWITCHING) &&
+    (info->state != LG_NET_RECOVERY_STATE_ACTIVE ||
+      (info->flags & LG_NET_RECOVERY_ACTIVE)) &&
+    info->versionLength <= LG_NET_RECOVERY_MAX_VERSION_LENGTH &&
+    (!info->versionLength || info->version);
+}
+
+bool lgNetRecoveryInfoEncode(
+    void * data, size_t size, const LGNetRecoveryInfo * info)
+{
+  const size_t needed = lgNetRecoveryInfoSize(info);
+  if (!data || !needed || size < needed || !lgNetRecoveryInfoValid(info))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64  (&writer, info->sessionID)        &&
+    lgNetWriterU64  (&writer, info->statusSequence)   &&
+    lgNetWriterU32  (&writer, info->capabilities)     &&
+    lgNetWriterU32  (&writer, info->state)            &&
+    lgNetWriterU32  (&writer, info->error)            &&
+    lgNetWriterU32  (&writer, info->flags)            &&
+    lgNetWriterU32  (&writer, info->maxTransitionMs)  &&
+    lgNetWriterU16  (&writer, info->versionLength)    &&
+    lgNetWriterZero (&writer, 10)                     &&
+    lgNetWriterBytes(&writer, info->version, info->versionLength) &&
+    lgNetWriterSize (&writer) == needed;
+}
+
+LGNetParseResult lgNetRecoveryInfoDecode(
+    LGNetRecoveryInfo * info, const void * data, size_t size)
+{
+  if (!info || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_RECOVERY_INFO_HEADER_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetRecoveryInfo decoded;
+  LGNetReader       reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64 (&reader, &decoded.sessionID)       ||
+      !lgNetReaderU64 (&reader, &decoded.statusSequence)  ||
+      !lgNetReaderU32 (&reader, &decoded.capabilities)    ||
+      !lgNetReaderU32 (&reader, &decoded.state)           ||
+      !lgNetReaderU32 (&reader, &decoded.error)           ||
+      !lgNetReaderU32 (&reader, &decoded.flags)           ||
+      !lgNetReaderU32 (&reader, &decoded.maxTransitionMs) ||
+      !lgNetReaderU16 (&reader, &decoded.versionLength)   ||
+      !lgNetReaderZero(&reader, 10))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  size_t                 expected;
+  const LGNetParseResult result = variableDecodeSize(
+    LG_NET_RECOVERY_INFO_HEADER_WIRE_SIZE, decoded.versionLength,
+    LG_NET_RECOVERY_MAX_VERSION_LENGTH, size, &expected);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetReaderView(&reader, &decoded.version, decoded.versionLength) ||
+      lgNetReaderConsumed(&reader) != expected)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (!lgNetRecoveryInfoValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *info = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+bool lgNetRecoveryRequestValid(const LGNetRecoveryRequest * request)
+{
+  return request && request->requestID && request->sessionID &&
+    request->timeoutMs && request->timeoutMs <= LG_NET_RECOVERY_MAX_TIMEOUT_MS &&
+    !(request->flags & ~RECOVERY_REQUEST_FLAGS);
+}
+
+bool lgNetRecoveryRequestEncode(
+    void * data, size_t size, const LGNetRecoveryRequest * request)
+{
+  if (!data || size < LG_NET_RECOVERY_REQUEST_WIRE_SIZE ||
+      !lgNetRecoveryRequestValid(request))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, request->requestID)              &&
+    lgNetWriterU64(&writer, request->sessionID)              &&
+    lgNetWriterU64(&writer, request->expectedStatusSequence) &&
+    lgNetWriterU32(&writer, request->timeoutMs)              &&
+    lgNetWriterU32(&writer, request->flags)                  &&
+    lgNetWriterSize(&writer) == LG_NET_RECOVERY_REQUEST_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetRecoveryRequestDecode(
+    LGNetRecoveryRequest * request, const void * data, size_t size)
+{
+  if (!request || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_RECOVERY_REQUEST_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetRecoveryRequest decoded;
+  LGNetReader          reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.requestID)              ||
+      !lgNetReaderU64(&reader, &decoded.sessionID)              ||
+      !lgNetReaderU64(&reader, &decoded.expectedStatusSequence) ||
+      !lgNetReaderU32(&reader, &decoded.timeoutMs)              ||
+      !lgNetReaderU32(&reader, &decoded.flags))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_RECOVERY_REQUEST_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetRecoveryRequestValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *request = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+bool lgNetRecoveryStatusValid(const LGNetRecoveryStatus * status)
+{
+  return status && status->sessionID && status->statusSequence &&
+    recoveryStateErrorValid(status->state, status->error) &&
+    !(status->flags & ~RECOVERY_FLAGS) &&
+    (!(status->flags & LG_NET_RECOVERY_ACTIVE) ||
+      status->state == LG_NET_RECOVERY_STATE_ACTIVE ||
+      status->state == LG_NET_RECOVERY_STATE_SWITCHING) &&
+    (status->state != LG_NET_RECOVERY_STATE_ACTIVE ||
+      (status->flags & LG_NET_RECOVERY_ACTIVE));
+}
+
+bool lgNetRecoveryStatusEncode(
+    void * data, size_t size, const LGNetRecoveryStatus * status)
+{
+  if (!data || size < LG_NET_RECOVERY_STATUS_WIRE_SIZE ||
+      !lgNetRecoveryStatusValid(status))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, status->requestID)      &&
+    lgNetWriterU64(&writer, status->sessionID)      &&
+    lgNetWriterU64(&writer, status->statusSequence) &&
+    lgNetWriterU32(&writer, status->state)          &&
+    lgNetWriterU32(&writer, status->error)          &&
+    lgNetWriterU32(&writer, status->flags)          &&
+    lgNetWriterU32(&writer, status->detail)         &&
+    lgNetWriterSize(&writer) == LG_NET_RECOVERY_STATUS_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetRecoveryStatusDecode(
+    LGNetRecoveryStatus * status, const void * data, size_t size)
+{
+  if (!status || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_RECOVERY_STATUS_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetRecoveryStatus decoded;
+  LGNetReader         reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.requestID)      ||
+      !lgNetReaderU64(&reader, &decoded.sessionID)      ||
+      !lgNetReaderU64(&reader, &decoded.statusSequence) ||
+      !lgNetReaderU32(&reader, &decoded.state)          ||
+      !lgNetReaderU32(&reader, &decoded.error)          ||
+      !lgNetReaderU32(&reader, &decoded.flags)          ||
+      !lgNetReaderU32(&reader, &decoded.detail))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_RECOVERY_STATUS_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetRecoveryStatusValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *status = decoded;
+  return LG_NET_PARSE_OK;
+}
+
 static bool videoCodecKnown(LGNetVideoCodec codec)
 {
   return codec == LG_NET_VIDEO_CODEC_PYROWAVE;
@@ -160,8 +691,13 @@ static bool videoCodecKnown(LGNetVideoCodec codec)
 
 static bool videoPixelFormatKnown(LGNetVideoPixelFormat format)
 {
-  return format >= LG_NET_VIDEO_PIXEL_FORMAT_NV12 &&
-    format <= LG_NET_VIDEO_PIXEL_FORMAT_YUV444P16F;
+  return format == LG_NET_VIDEO_PIXEL_FORMAT_NV12      ||
+    format == LG_NET_VIDEO_PIXEL_FORMAT_P010           ||
+    format == LG_NET_VIDEO_PIXEL_FORMAT_YUV420P8       ||
+    format == LG_NET_VIDEO_PIXEL_FORMAT_YUV420P10      ||
+    format == LG_NET_VIDEO_PIXEL_FORMAT_YUV444P8       ||
+    format == LG_NET_VIDEO_PIXEL_FORMAT_YUV444P10      ||
+    format == LG_NET_VIDEO_PIXEL_FORMAT_YUV444P16F;
 }
 
 static bool videoPixelFormatValid(const LGNetVideoStreamConfig * config)
@@ -184,14 +720,6 @@ static bool videoPixelFormatValid(const LGNetVideoStreamConfig * config)
       return config->chromaSubsampling == LG_NET_VIDEO_CHROMA_420 &&
         config->planeCount == 3 && config->bitDepth == 10;
 
-    case LG_NET_VIDEO_PIXEL_FORMAT_YUV422P8:
-      return config->chromaSubsampling == LG_NET_VIDEO_CHROMA_422 &&
-        config->planeCount == 3 && config->bitDepth == 8;
-
-    case LG_NET_VIDEO_PIXEL_FORMAT_YUV422P10:
-      return config->chromaSubsampling == LG_NET_VIDEO_CHROMA_422 &&
-        config->planeCount == 3 && config->bitDepth == 10;
-
     case LG_NET_VIDEO_PIXEL_FORMAT_YUV444P8:
       return config->chromaSubsampling == LG_NET_VIDEO_CHROMA_444 &&
         config->planeCount == 3 && config->bitDepth == 8;
@@ -210,8 +738,8 @@ static bool videoPixelFormatValid(const LGNetVideoStreamConfig * config)
 
 static bool videoChromaKnown(LGNetVideoChromaSubsampling chroma)
 {
-  return chroma >= LG_NET_VIDEO_CHROMA_420 &&
-    chroma <= LG_NET_VIDEO_CHROMA_444;
+  return chroma == LG_NET_VIDEO_CHROMA_420 ||
+    chroma == LG_NET_VIDEO_CHROMA_444;
 }
 
 static bool colorPrimariesKnown(LGNetColorPrimaries primaries)
@@ -238,15 +766,143 @@ static bool colorRangeKnown(LGNetColorRange range)
     range == LG_NET_COLOR_RANGE_FULL;
 }
 
+static bool videoControlReasonKnown(LGNetVideoControlReason reason)
+{
+  return reason >= LG_NET_VIDEO_CONTROL_USER &&
+    reason <= LG_NET_VIDEO_CONTROL_RECONFIGURE;
+}
+
+bool lgNetVideoSubscribeValid(const LGNetVideoSubscribe * subscribe)
+{
+  return subscribe && subscribe->subscriptionID &&
+    (!subscribe->preferredCodec || videoCodecKnown(subscribe->preferredCodec)) &&
+    !(subscribe->flags & ~VIDEO_SUBSCRIBE_FLAGS) && subscribe->maxWidth &&
+    subscribe->maxWidth <= LG_NET_VIDEO_MAX_WIDTH && subscribe->maxHeight &&
+    subscribe->maxHeight <= LG_NET_VIDEO_MAX_HEIGHT &&
+    subscribe->maxFrameLength &&
+    subscribe->maxFrameLength <= LG_NET_VIDEO_MAX_FRAME_LENGTH &&
+    subscribe->maxFrameLatencyMs && subscribe->maxFrameRate;
+}
+
+bool lgNetVideoSubscribeEncode(
+    void * data, size_t size, const LGNetVideoSubscribe * subscribe)
+{
+  if (!data || size < LG_NET_VIDEO_SUBSCRIBE_WIRE_SIZE ||
+      !lgNetVideoSubscribeValid(subscribe))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, subscribe->subscriptionID)  &&
+    lgNetWriterU16(&writer, subscribe->preferredCodec)  &&
+    lgNetWriterU16(&writer, subscribe->flags)           &&
+    lgNetWriterU32(&writer, subscribe->maxWidth)        &&
+    lgNetWriterU32(&writer, subscribe->maxHeight)       &&
+    lgNetWriterU32(&writer, subscribe->maxFrameLength)  &&
+    lgNetWriterU32(&writer, subscribe->maxFrameLatencyMs) &&
+    lgNetWriterU32(&writer, subscribe->maxFrameRate)    &&
+    lgNetWriterSize(&writer) == LG_NET_VIDEO_SUBSCRIBE_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetVideoSubscribeDecode(
+    LGNetVideoSubscribe * subscribe, const void * data, size_t size)
+{
+  if (!subscribe || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_VIDEO_SUBSCRIBE_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetVideoSubscribe decoded;
+  LGNetReader         reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.subscriptionID)  ||
+      !lgNetReaderU16(&reader, &decoded.preferredCodec)  ||
+      !lgNetReaderU16(&reader, &decoded.flags)           ||
+      !lgNetReaderU32(&reader, &decoded.maxWidth)        ||
+      !lgNetReaderU32(&reader, &decoded.maxHeight)       ||
+      !lgNetReaderU32(&reader, &decoded.maxFrameLength)  ||
+      !lgNetReaderU32(&reader, &decoded.maxFrameLatencyMs) ||
+      !lgNetReaderU32(&reader, &decoded.maxFrameRate))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_VIDEO_SUBSCRIBE_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetVideoSubscribeValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *subscribe = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+bool lgNetVideoControlValid(const LGNetVideoControl * control)
+{
+  return control && control->streamID &&
+    videoControlReasonKnown(control->reason);
+}
+
+bool lgNetVideoControlEncode(
+    void * data, size_t size, const LGNetVideoControl * control)
+{
+  if (!data || size < LG_NET_VIDEO_CONTROL_WIRE_SIZE ||
+      !lgNetVideoControlValid(control))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU32(&writer, control->streamID)    &&
+    lgNetWriterU32(&writer, control->reason)      &&
+    lgNetWriterU64(&writer, control->configEpoch) &&
+    lgNetWriterU64(&writer, control->frameID)     &&
+    lgNetWriterSize(&writer) == LG_NET_VIDEO_CONTROL_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetVideoControlDecode(
+    LGNetVideoControl * control, const void * data, size_t size)
+{
+  if (!control || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_VIDEO_CONTROL_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetVideoControl decoded;
+  LGNetReader       reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU32(&reader, &decoded.streamID)    ||
+      !lgNetReaderU32(&reader, &decoded.reason)      ||
+      !lgNetReaderU64(&reader, &decoded.configEpoch) ||
+      !lgNetReaderU64(&reader, &decoded.frameID))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_VIDEO_CONTROL_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetVideoControlValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *control = decoded;
+  return LG_NET_PARSE_OK;
+}
+
 bool lgNetVideoStreamConfigValid(const LGNetVideoStreamConfig * config)
 {
   return config && config->streamID && videoCodecKnown(config->codec) &&
-    config->codecVersion && config->configEpoch && config->width &&
+    config->codecVersion >= LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_MIN &&
+    config->codecVersion <= LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_MAX &&
+    config->configEpoch && config->width &&
     config->width <= LG_NET_VIDEO_MAX_WIDTH && config->height &&
     config->height <= LG_NET_VIDEO_MAX_HEIGHT &&
     config->refreshNumerator && config->refreshDenominator &&
     videoPixelFormatKnown(config->pixelFormat) &&
     videoChromaKnown(config->chromaSubsampling) &&
+    (config->chromaSubsampling != LG_NET_VIDEO_CHROMA_420 ||
+      (!(config->width & 1U) && !(config->height & 1U))) &&
     colorPrimariesKnown(config->colorPrimaries) &&
     colorTransferKnown(config->colorTransfer) &&
     colorMatrixKnown(config->colorMatrix) &&
@@ -360,7 +1016,9 @@ bool lgNetVideoFrameValid(const LGNetVideoFrame * frame)
     !(frame->flags & ~VIDEO_FRAME_FLAGS) && frame->configEpoch &&
     frame->frameID && frame->captureTimestampNs &&
     frame->presentationTimestampNs && frame->encodedLength && frame->data &&
-    frame->blockCount && frame->fragmentCount && frame->deadlineMs &&
+    frame->blockCount && frame->blockCount <= LG_NET_VIDEO_MAX_BLOCKS &&
+    frame->fragmentCount &&
+    frame->fragmentCount <= LG_NET_VIDEO_MAX_FRAGMENTS && frame->deadlineMs &&
     ((frame->flags & LG_NET_VIDEO_FRAME_HAS_CHECKSUM) || !frame->checksum) &&
     lgNetVideoFrameSize(frame) != 0;
 }
@@ -383,8 +1041,8 @@ bool lgNetVideoFrameEncode(
     lgNetWriterU64(&writer, frame->captureTimestampNs)       &&
     lgNetWriterU64(&writer, frame->presentationTimestampNs)  &&
     lgNetWriterU32(&writer, frame->encodedLength)            &&
-    lgNetWriterU16(&writer, frame->blockCount)               &&
-    lgNetWriterU16(&writer, frame->fragmentCount)            &&
+    lgNetWriterU32(&writer, frame->blockCount)               &&
+    lgNetWriterU32(&writer, frame->fragmentCount)            &&
     lgNetWriterU32(&writer, frame->deadlineMs)               &&
     lgNetWriterU32(&writer, frame->checksum)                 &&
     lgNetWriterBytes(&writer, frame->data, frame->encodedLength) &&
@@ -412,8 +1070,8 @@ LGNetParseResult lgNetVideoFrameDecode(
       !lgNetReaderU64(&reader, &decoded.captureTimestampNs)      ||
       !lgNetReaderU64(&reader, &decoded.presentationTimestampNs) ||
       !lgNetReaderU32(&reader, &decoded.encodedLength)           ||
-      !lgNetReaderU16(&reader, &decoded.blockCount)              ||
-      !lgNetReaderU16(&reader, &decoded.fragmentCount)           ||
+      !lgNetReaderU32(&reader, &decoded.blockCount)              ||
+      !lgNetReaderU32(&reader, &decoded.fragmentCount)           ||
       !lgNetReaderU32(&reader, &decoded.deadlineMs)              ||
       !lgNetReaderU32(&reader, &decoded.checksum))
     return LG_NET_PARSE_INVALID_VALUE;
@@ -449,14 +1107,39 @@ bool lgNetVideoFragmentValid(const LGNetVideoFragment * fragment)
     fragment->frameID && fragment->frameLength &&
     fragment->frameLength <= LG_NET_VIDEO_MAX_FRAME_LENGTH &&
     fragment->fragmentCount &&
+    fragment->fragmentCount <= LG_NET_VIDEO_MAX_FRAGMENTS &&
     fragment->fragmentIndex < fragment->fragmentCount &&
-    fragment->blockCount &&
-    fragment->blockIndex < fragment->blockCount && fragment->payloadLength &&
+    fragment->blockCount && fragment->blockCount <= LG_NET_VIDEO_MAX_BLOCKS &&
+    fragment->blockIndex < fragment->blockCount && fragment->blockLength &&
+    fragment->payloadLength &&
     fragment->payload && !(fragment->flags & ~VIDEO_FRAGMENT_FLAGS) &&
-    fragment->offset <= fragment->frameLength &&
-    fragment->payloadLength <= fragment->frameLength - fragment->offset &&
+    fragment->frameOffset <= fragment->frameLength &&
+    fragment->payloadLength <= fragment->frameLength - fragment->frameOffset &&
+    fragment->blockOffset <= fragment->blockLength &&
+    fragment->payloadLength <= fragment->blockLength - fragment->blockOffset &&
+    fragment->frameOffset >= fragment->blockOffset &&
+    fragment->blockLength <= fragment->frameLength -
+      (fragment->frameOffset - fragment->blockOffset) &&
+    (!!(fragment->flags & LG_NET_VIDEO_FRAGMENT_BLOCK_START) ==
+      (fragment->blockOffset == 0)) &&
+    (!!(fragment->flags & LG_NET_VIDEO_FRAGMENT_BLOCK_END) ==
+      (fragment->blockOffset + fragment->payloadLength ==
+        fragment->blockLength)) &&
     (!(fragment->flags & LG_NET_VIDEO_FRAGMENT_FRAME_END) ||
-      fragment->offset + fragment->payloadLength == fragment->frameLength) &&
+      fragment->frameOffset + fragment->payloadLength ==
+        fragment->frameLength) &&
+    (!!(fragment->flags & LG_NET_VIDEO_FRAGMENT_RECOVERY) ==
+      !!fragment->recoveryCount) &&
+    fragment->recoveryType <= LG_NET_VIDEO_RECOVERY_DUPLICATE &&
+    (!!(fragment->flags & LG_NET_VIDEO_FRAGMENT_RECOVERY) ==
+      (fragment->recoveryType != LG_NET_VIDEO_RECOVERY_NONE)) &&
+    (!(fragment->flags & LG_NET_VIDEO_FRAGMENT_RECOVERY) ||
+      (fragment->recoveryGroup && fragment->recoveryCount > 1 &&
+        fragment->recoveryIndex < fragment->recoveryCount)) &&
+    ((fragment->flags & LG_NET_VIDEO_FRAGMENT_RECOVERY) ||
+      (!fragment->recoveryGroup && !fragment->recoveryIndex)) &&
+    ((fragment->flags & LG_NET_VIDEO_FRAGMENT_CHECKSUM) ||
+      !fragment->checksum) &&
     lgNetVideoFragmentSize(fragment) != 0;
 }
 
@@ -471,19 +1154,26 @@ bool lgNetVideoFragmentEncode(
   LGNetWriter writer;
   lgNetWriterInit(&writer, data, size);
   return
-    lgNetWriterU32(&writer, fragment->streamID)       &&
-    lgNetWriterU64(&writer, fragment->configEpoch)    &&
-    lgNetWriterU64(&writer, fragment->frameID)        &&
-    lgNetWriterU32(&writer, fragment->frameLength)    &&
-    lgNetWriterU32(&writer, fragment->offset)         &&
-    lgNetWriterU16(&writer, fragment->fragmentIndex)  &&
-    lgNetWriterU16(&writer, fragment->fragmentCount)  &&
-    lgNetWriterU16(&writer, fragment->blockIndex)     &&
-    lgNetWriterU16(&writer, fragment->blockCount)     &&
-    lgNetWriterU16(&writer, fragment->payloadLength)  &&
-    lgNetWriterU16(&writer, fragment->flags)          &&
+    lgNetWriterU32 (&writer, fragment->streamID)       &&
+    lgNetWriterU16 (&writer, fragment->flags)          &&
+    lgNetWriterU16 (&writer, fragment->recoveryType)   &&
+    lgNetWriterU64 (&writer, fragment->configEpoch)    &&
+    lgNetWriterU64 (&writer, fragment->frameID)        &&
+    lgNetWriterU32 (&writer, fragment->frameOffset)    &&
+    lgNetWriterU32 (&writer, fragment->frameLength)    &&
+    lgNetWriterU32 (&writer, fragment->blockIndex)     &&
+    lgNetWriterU32 (&writer, fragment->blockOffset)    &&
+    lgNetWriterU32 (&writer, fragment->blockLength)    &&
+    lgNetWriterU32 (&writer, fragment->blockCount)     &&
+    lgNetWriterU32 (&writer, fragment->fragmentIndex)  &&
+    lgNetWriterU32 (&writer, fragment->fragmentCount)  &&
+    lgNetWriterU32 (&writer, fragment->recoveryGroup)  &&
+    lgNetWriterU16 (&writer, fragment->recoveryIndex)  &&
+    lgNetWriterU16 (&writer, fragment->recoveryCount)  &&
+    lgNetWriterU32 (&writer, fragment->payloadLength)  &&
+    lgNetWriterU32 (&writer, fragment->checksum)       &&
     lgNetWriterBytes(&writer, fragment->payload,
-      fragment->payloadLength)                        &&
+      fragment->payloadLength)                         &&
     lgNetWriterSize(&writer) == wireSize;
 }
 
@@ -500,17 +1190,24 @@ LGNetParseResult lgNetVideoFragmentDecode(
   size_t             expected;
   memset(&decoded, 0, sizeof(decoded));
   lgNetReaderInit(&reader, data, size);
-  if (!lgNetReaderU32(&reader, &decoded.streamID)      ||
-      !lgNetReaderU64(&reader, &decoded.configEpoch)   ||
-      !lgNetReaderU64(&reader, &decoded.frameID)       ||
-      !lgNetReaderU32(&reader, &decoded.frameLength)   ||
-      !lgNetReaderU32(&reader, &decoded.offset)        ||
-      !lgNetReaderU16(&reader, &decoded.fragmentIndex) ||
-      !lgNetReaderU16(&reader, &decoded.fragmentCount) ||
-      !lgNetReaderU16(&reader, &decoded.blockIndex)    ||
-      !lgNetReaderU16(&reader, &decoded.blockCount)    ||
-      !lgNetReaderU16(&reader, &decoded.payloadLength) ||
-      !lgNetReaderU16(&reader, &decoded.flags))
+  if (!lgNetReaderU32 (&reader, &decoded.streamID)       ||
+      !lgNetReaderU16 (&reader, &decoded.flags)          ||
+      !lgNetReaderU16 (&reader, &decoded.recoveryType)   ||
+      !lgNetReaderU64 (&reader, &decoded.configEpoch)    ||
+      !lgNetReaderU64 (&reader, &decoded.frameID)        ||
+      !lgNetReaderU32 (&reader, &decoded.frameOffset)    ||
+      !lgNetReaderU32 (&reader, &decoded.frameLength)    ||
+      !lgNetReaderU32 (&reader, &decoded.blockIndex)     ||
+      !lgNetReaderU32 (&reader, &decoded.blockOffset)    ||
+      !lgNetReaderU32 (&reader, &decoded.blockLength)    ||
+      !lgNetReaderU32 (&reader, &decoded.blockCount)     ||
+      !lgNetReaderU32 (&reader, &decoded.fragmentIndex)  ||
+      !lgNetReaderU32 (&reader, &decoded.fragmentCount)  ||
+      !lgNetReaderU32 (&reader, &decoded.recoveryGroup)  ||
+      !lgNetReaderU16 (&reader, &decoded.recoveryIndex)  ||
+      !lgNetReaderU16 (&reader, &decoded.recoveryCount)  ||
+      !lgNetReaderU32 (&reader, &decoded.payloadLength)  ||
+      !lgNetReaderU32 (&reader, &decoded.checksum))
     return LG_NET_PARSE_INVALID_VALUE;
 
   LGNetParseResult result = variableDecodeSize(
@@ -598,12 +1295,141 @@ LGNetParseResult lgNetVideoFeedbackDecode(
   return LG_NET_PARSE_OK;
 }
 
+bool lgNetVideoScheduleValid(const LGNetVideoSchedule * schedule)
+{
+  return schedule && schedule->streamID && schedule->configEpoch &&
+    schedule->frameID && schedule->captureTimestampNs &&
+    schedule->presentationTimestampNs && schedule->deadlineTimestampNs &&
+    schedule->captureTimestampNs <= schedule->presentationTimestampNs &&
+    schedule->captureTimestampNs <= schedule->deadlineTimestampNs &&
+    schedule->deadlineTimestampNs <= schedule->presentationTimestampNs &&
+    schedule->flags && !(schedule->flags & ~VIDEO_SCHEDULE_FLAGS);
+}
+
+bool lgNetVideoScheduleEncode(
+    void * data, size_t size, const LGNetVideoSchedule * schedule)
+{
+  if (!data || size < LG_NET_VIDEO_SCHEDULE_WIRE_SIZE ||
+      !lgNetVideoScheduleValid(schedule))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU32(&writer, schedule->streamID)                &&
+    lgNetWriterU32(&writer, schedule->flags)                   &&
+    lgNetWriterU64(&writer, schedule->configEpoch)             &&
+    lgNetWriterU64(&writer, schedule->frameID)                 &&
+    lgNetWriterU64(&writer, schedule->captureTimestampNs)      &&
+    lgNetWriterU64(&writer, schedule->presentationTimestampNs) &&
+    lgNetWriterU64(&writer, schedule->deadlineTimestampNs)     &&
+    lgNetWriterSize(&writer) == LG_NET_VIDEO_SCHEDULE_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetVideoScheduleDecode(
+    LGNetVideoSchedule * schedule, const void * data, size_t size)
+{
+  if (!schedule || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_VIDEO_SCHEDULE_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetVideoSchedule decoded;
+  LGNetReader        reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU32(&reader, &decoded.streamID)                ||
+      !lgNetReaderU32(&reader, &decoded.flags)                   ||
+      !lgNetReaderU64(&reader, &decoded.configEpoch)             ||
+      !lgNetReaderU64(&reader, &decoded.frameID)                 ||
+      !lgNetReaderU64(&reader, &decoded.captureTimestampNs)      ||
+      !lgNetReaderU64(&reader, &decoded.presentationTimestampNs) ||
+      !lgNetReaderU64(&reader, &decoded.deadlineTimestampNs))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_VIDEO_SCHEDULE_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetVideoScheduleValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *schedule = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+static bool videoStateKnown(LGNetVideoState state)
+{
+  return state >= LG_NET_VIDEO_STATE_SUBSCRIBED &&
+    state <= LG_NET_VIDEO_STATE_ERROR;
+}
+
+bool lgNetVideoStatusValid(const LGNetVideoStatus * status)
+{
+  return status && status->streamID && status->statusSequence &&
+    videoStateKnown(status->state) && !(status->flags & ~VIDEO_STATUS_FLAGS);
+}
+
+bool lgNetVideoStatusEncode(
+    void * data, size_t size, const LGNetVideoStatus * status)
+{
+  if (!data || size < LG_NET_VIDEO_STATUS_WIRE_SIZE ||
+      !lgNetVideoStatusValid(status))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU32 (&writer, status->streamID)       &&
+    lgNetWriterU16 (&writer, status->state)          &&
+    lgNetWriterZero(&writer, 2)                      &&
+    lgNetWriterU64 (&writer, status->configEpoch)    &&
+    lgNetWriterU64 (&writer, status->lastFrameID)    &&
+    lgNetWriterU64 (&writer, status->statusSequence) &&
+    lgNetWriterU32 (&writer, status->flags)          &&
+    lgNetWriterU32 (&writer, status->detail)         &&
+    lgNetWriterSize(&writer) == LG_NET_VIDEO_STATUS_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetVideoStatusDecode(
+    LGNetVideoStatus * status, const void * data, size_t size)
+{
+  if (!status || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_VIDEO_STATUS_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetVideoStatus decoded;
+  LGNetReader      reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU32 (&reader, &decoded.streamID)       ||
+      !lgNetReaderU16 (&reader, &decoded.state)          ||
+      !lgNetReaderZero(&reader, 2)                       ||
+      !lgNetReaderU64 (&reader, &decoded.configEpoch)    ||
+      !lgNetReaderU64 (&reader, &decoded.lastFrameID)    ||
+      !lgNetReaderU64 (&reader, &decoded.statusSequence) ||
+      !lgNetReaderU32 (&reader, &decoded.flags)          ||
+      !lgNetReaderU32 (&reader, &decoded.detail))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_VIDEO_STATUS_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetVideoStatusValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *status = decoded;
+  return LG_NET_PARSE_OK;
+}
+
 bool lgNetCursorPositionValid(const LGNetCursorPosition * position)
 {
   return position && position->updateID && position->timestampNs &&
     position->desktopWidth && position->desktopHeight &&
-    position->desktopWidth <= LG_NET_VIDEO_MAX_WIDTH &&
-    position->desktopHeight <= LG_NET_VIDEO_MAX_HEIGHT &&
+    position->desktopWidth <= LG_NET_CURSOR_MAX_DESKTOP_WIDTH &&
+    position->desktopHeight <= LG_NET_CURSOR_MAX_DESKTOP_HEIGHT &&
     !(position->flags & ~CURSOR_POSITION_FLAGS);
 }
 
@@ -777,9 +1603,216 @@ LGNetParseResult lgNetCursorShapeDecode(
   return LG_NET_PARSE_OK;
 }
 
+bool lgNetCursorStateValid(const LGNetCursorState * state)
+{
+  return state && state->stateSequence &&
+    !(state->flags & ~CURSOR_STATE_FLAGS) &&
+    (!!state->shapeID ==
+      !!(state->flags & LG_NET_CURSOR_STATE_SHAPE_VALID)) &&
+    (!!state->positionID ==
+      !!(state->flags & LG_NET_CURSOR_STATE_POSITION_VALID)) &&
+    (!!state->transformID ==
+      !!(state->flags & LG_NET_CURSOR_STATE_TRANSFORM_VALID));
+}
+
+bool lgNetCursorStateEncode(
+    void * data, size_t size, const LGNetCursorState * state)
+{
+  if (!data || size < LG_NET_CURSOR_STATE_WIRE_SIZE ||
+      !lgNetCursorStateValid(state))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, state->stateSequence) &&
+    lgNetWriterU64(&writer, state->shapeID)       &&
+    lgNetWriterU64(&writer, state->positionID)    &&
+    lgNetWriterU64(&writer, state->transformID)   &&
+    lgNetWriterU32(&writer, state->flags)         &&
+    lgNetWriterU32(&writer, state->displayID)     &&
+    lgNetWriterSize(&writer) == LG_NET_CURSOR_STATE_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetCursorStateDecode(
+    LGNetCursorState * state, const void * data, size_t size)
+{
+  if (!state || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CURSOR_STATE_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetCursorState decoded;
+  LGNetReader      reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.stateSequence) ||
+      !lgNetReaderU64(&reader, &decoded.shapeID)       ||
+      !lgNetReaderU64(&reader, &decoded.positionID)    ||
+      !lgNetReaderU64(&reader, &decoded.transformID)   ||
+      !lgNetReaderU32(&reader, &decoded.flags)         ||
+      !lgNetReaderU32(&reader, &decoded.displayID))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_CURSOR_STATE_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetCursorStateValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *state = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+static bool cursorRotationKnown(LGNetCursorRotation rotation)
+{
+  return rotation >= LG_NET_CURSOR_ROTATION_0 &&
+    rotation <= LG_NET_CURSOR_ROTATION_270;
+}
+
+bool lgNetCursorTransformValid(const LGNetCursorTransform * transform)
+{
+  return transform && transform->transformID &&
+    cursorRotationKnown(transform->rotation) &&
+    !(transform->flags & ~CURSOR_TRANSFORM_FLAGS) &&
+    transform->sourceWidth && transform->sourceWidth <= LG_NET_VIDEO_MAX_WIDTH &&
+    transform->sourceHeight &&
+    transform->sourceHeight <= LG_NET_VIDEO_MAX_HEIGHT &&
+    transform->targetWidth &&
+    transform->targetWidth <= LG_NET_CURSOR_MAX_DESKTOP_WIDTH &&
+    transform->targetHeight &&
+    transform->targetHeight <= LG_NET_CURSOR_MAX_DESKTOP_HEIGHT &&
+    transform->scaleNumerator && transform->scaleDenominator;
+}
+
+bool lgNetCursorTransformEncode(
+    void * data, size_t size, const LGNetCursorTransform * transform)
+{
+  if (!data || size < LG_NET_CURSOR_TRANSFORM_WIRE_SIZE ||
+      !lgNetCursorTransformValid(transform))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, transform->transformID)      &&
+    lgNetWriterU32(&writer, transform->displayID)        &&
+    lgNetWriterU16(&writer, transform->rotation)         &&
+    lgNetWriterU16(&writer, transform->flags)            &&
+    lgNetWriterU32(&writer, transform->sourceWidth)      &&
+    lgNetWriterU32(&writer, transform->sourceHeight)     &&
+    lgNetWriterU32(&writer, transform->targetWidth)      &&
+    lgNetWriterU32(&writer, transform->targetHeight)     &&
+    lgNetWriterI32(&writer, transform->offsetX)          &&
+    lgNetWriterI32(&writer, transform->offsetY)          &&
+    lgNetWriterU32(&writer, transform->scaleNumerator)   &&
+    lgNetWriterU32(&writer, transform->scaleDenominator) &&
+    lgNetWriterSize(&writer) == LG_NET_CURSOR_TRANSFORM_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetCursorTransformDecode(
+    LGNetCursorTransform * transform, const void * data, size_t size)
+{
+  if (!transform || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CURSOR_TRANSFORM_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetCursorTransform decoded;
+  LGNetReader          reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.transformID)      ||
+      !lgNetReaderU32(&reader, &decoded.displayID)        ||
+      !lgNetReaderU16(&reader, &decoded.rotation)         ||
+      !lgNetReaderU16(&reader, &decoded.flags)            ||
+      !lgNetReaderU32(&reader, &decoded.sourceWidth)      ||
+      !lgNetReaderU32(&reader, &decoded.sourceHeight)     ||
+      !lgNetReaderU32(&reader, &decoded.targetWidth)      ||
+      !lgNetReaderU32(&reader, &decoded.targetHeight)     ||
+      !lgNetReaderI32(&reader, &decoded.offsetX)          ||
+      !lgNetReaderI32(&reader, &decoded.offsetY)          ||
+      !lgNetReaderU32(&reader, &decoded.scaleNumerator)   ||
+      !lgNetReaderU32(&reader, &decoded.scaleDenominator))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_CURSOR_TRANSFORM_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetCursorTransformValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *transform = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+static bool cursorStatusKnown(LGNetCursorStatusCode status)
+{
+  return status >= LG_NET_CURSOR_STATUS_APPLIED &&
+    status <= LG_NET_CURSOR_STATUS_ERROR;
+}
+
+bool lgNetCursorStatusValid(const LGNetCursorStatus * status)
+{
+  return status && status->stateSequence && cursorStatusKnown(status->status);
+}
+
+bool lgNetCursorStatusEncode(
+    void * data, size_t size, const LGNetCursorStatus * status)
+{
+  if (!data || size < LG_NET_CURSOR_STATUS_WIRE_SIZE ||
+      !lgNetCursorStatusValid(status))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, status->stateSequence)      &&
+    lgNetWriterU64(&writer, status->appliedShapeID)     &&
+    lgNetWriterU64(&writer, status->appliedPositionID)  &&
+    lgNetWriterU64(&writer, status->appliedTransformID) &&
+    lgNetWriterU32(&writer, status->status)             &&
+    lgNetWriterU32(&writer, status->detail)             &&
+    lgNetWriterSize(&writer) == LG_NET_CURSOR_STATUS_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetCursorStatusDecode(
+    LGNetCursorStatus * status, const void * data, size_t size)
+{
+  if (!status || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CURSOR_STATUS_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetCursorStatus decoded;
+  LGNetReader       reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.stateSequence)      ||
+      !lgNetReaderU64(&reader, &decoded.appliedShapeID)     ||
+      !lgNetReaderU64(&reader, &decoded.appliedPositionID)  ||
+      !lgNetReaderU64(&reader, &decoded.appliedTransformID) ||
+      !lgNetReaderU32(&reader, &decoded.status)             ||
+      !lgNetReaderU32(&reader, &decoded.detail))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_CURSOR_STATUS_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetCursorStatusValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *status = decoded;
+  return LG_NET_PARSE_OK;
+}
+
 bool lgNetInputClaimValid(const LGNetInputClaim * claim)
 {
   return claim && claim->claimantID && claim->claimEpoch && claim->leaseMs &&
+    claim->leaseMs <= LG_NET_INPUT_MAX_LEASE_MS &&
     claim->flags && !(claim->flags & ~INPUT_CLAIM_FLAGS) &&
     (!(claim->flags & LG_NET_INPUT_CLAIM_EXCLUSIVE) ||
       (claim->flags & (LG_NET_INPUT_CLAIM_KEYBOARD |
@@ -841,7 +1874,11 @@ static bool inputStatusKnown(LGNetInputStatusCode status)
 bool lgNetInputStatusValid(const LGNetInputStatus * status)
 {
   return status && status->claimEpoch && inputStatusKnown(status->status) &&
-    !(status->flags & ~INPUT_CLAIM_FLAGS);
+    !(status->flags & ~INPUT_CLAIM_FLAGS) &&
+    (!(status->flags & LG_NET_INPUT_CLAIM_EXCLUSIVE) ||
+      (status->flags & (LG_NET_INPUT_CLAIM_KEYBOARD |
+        LG_NET_INPUT_CLAIM_POINTER))) &&
+    status->leaseRemainingMs <= LG_NET_INPUT_MAX_LEASE_MS;
 }
 
 bool lgNetInputStatusEncode(
@@ -894,9 +1931,66 @@ LGNetParseResult lgNetInputStatusDecode(
   return LG_NET_PARSE_OK;
 }
 
+bool lgNetInputControlValid(const LGNetInputControl * control)
+{
+  return control && control->claimantID && control->claimEpoch &&
+    control->sequence && !(control->flags & ~INPUT_CLAIM_FLAGS) &&
+    control->leaseMs <= LG_NET_INPUT_MAX_LEASE_MS;
+}
+
+bool lgNetInputControlEncode(
+    void * data, size_t size, const LGNetInputControl * control)
+{
+  if (!data || size < LG_NET_INPUT_CONTROL_WIRE_SIZE ||
+      !lgNetInputControlValid(control))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, control->claimantID) &&
+    lgNetWriterU64(&writer, control->claimEpoch) &&
+    lgNetWriterU64(&writer, control->sequence)   &&
+    lgNetWriterU32(&writer, control->flags)      &&
+    lgNetWriterU32(&writer, control->leaseMs)    &&
+    lgNetWriterSize(&writer) == LG_NET_INPUT_CONTROL_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetInputControlDecode(
+    LGNetInputControl * control, const void * data, size_t size)
+{
+  if (!control || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_INPUT_CONTROL_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetInputControl decoded;
+  LGNetReader       reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.claimantID) ||
+      !lgNetReaderU64(&reader, &decoded.claimEpoch) ||
+      !lgNetReaderU64(&reader, &decoded.sequence)   ||
+      !lgNetReaderU32(&reader, &decoded.flags)      ||
+      !lgNetReaderU32(&reader, &decoded.leaseMs))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_INPUT_CONTROL_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetInputControlValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *control = decoded;
+  return LG_NET_PARSE_OK;
+}
+
 bool lgNetInputRelativeValid(const LGNetInputRelative * relative)
 {
-  return relative && relative->sequence && relative->timestampNs;
+  return relative && relative->sequence && relative->timestampNs &&
+    !(relative->buttons & ~LG_NET_POINTER_BUTTON_MASK) &&
+    !(relative->changedButtons & ~LG_NET_POINTER_BUTTON_MASK);
 }
 
 bool lgNetInputRelativeEncode(
@@ -962,7 +2056,9 @@ bool lgNetInputAbsoluteValid(const LGNetInputAbsolute * absolute)
     absolute->height <= LG_NET_INPUT_ABSOLUTE_MAX_HEIGHT &&
     absolute->x >= 0 && absolute->y >= 0 &&
     (uint32_t)absolute->x < absolute->width &&
-    (uint32_t)absolute->y < absolute->height;
+    (uint32_t)absolute->y < absolute->height &&
+    !(absolute->buttons & ~LG_NET_POINTER_BUTTON_MASK) &&
+    !(absolute->changedButtons & ~LG_NET_POINTER_BUTTON_MASK);
 }
 
 bool lgNetInputAbsoluteEncode(
@@ -1028,6 +2124,8 @@ bool lgNetInputKeyboardValid(const LGNetInputKeyboard * keyboard)
   return keyboard && keyboard->sequence && keyboard->timestampNs &&
     (keyboard->usage || keyboard->scanCode) &&
     !(keyboard->flags & ~KEYBOARD_FLAGS) &&
+    (!(keyboard->flags & LG_NET_KEYBOARD_REPEAT) ||
+      (keyboard->flags & LG_NET_KEYBOARD_DOWN)) &&
     !(keyboard->modifiers & ~LG_NET_INPUT_KEYBOARD_MODIFIER_MASK);
 }
 
@@ -1142,6 +2240,63 @@ static bool audioDirectionKnown(LGNetAudioDirection direction)
     direction == LG_NET_AUDIO_DIRECTION_CAPTURE;
 }
 
+bool lgNetAudioSubscribeValid(const LGNetAudioSubscribe * subscribe)
+{
+  return subscribe && subscribe->subscriberID && subscribe->directions &&
+    !(subscribe->directions & ~AUDIO_DIRECTIONS) &&
+    subscribe->targetLatencyUs && subscribe->maxPacketFrames &&
+    subscribe->maxPacketFrames <= LG_NET_AUDIO_MAX_PACKET_FRAMES &&
+    !(subscribe->flags & ~AUDIO_SUBSCRIBE_FLAGS);
+}
+
+bool lgNetAudioSubscribeEncode(
+    void * data, size_t size, const LGNetAudioSubscribe * subscribe)
+{
+  if (!data || size < LG_NET_AUDIO_SUBSCRIBE_WIRE_SIZE ||
+      !lgNetAudioSubscribeValid(subscribe))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, subscribe->subscriberID)    &&
+    lgNetWriterU32(&writer, subscribe->directions)      &&
+    lgNetWriterU32(&writer, subscribe->targetLatencyUs) &&
+    lgNetWriterU32(&writer, subscribe->maxPacketFrames) &&
+    lgNetWriterU32(&writer, subscribe->flags)           &&
+    lgNetWriterSize(&writer) == LG_NET_AUDIO_SUBSCRIBE_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetAudioSubscribeDecode(
+    LGNetAudioSubscribe * subscribe, const void * data, size_t size)
+{
+  if (!subscribe || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_AUDIO_SUBSCRIBE_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetAudioSubscribe decoded;
+  LGNetReader         reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.subscriberID)    ||
+      !lgNetReaderU32(&reader, &decoded.directions)      ||
+      !lgNetReaderU32(&reader, &decoded.targetLatencyUs) ||
+      !lgNetReaderU32(&reader, &decoded.maxPacketFrames) ||
+      !lgNetReaderU32(&reader, &decoded.flags))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_AUDIO_SUBSCRIBE_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetAudioSubscribeValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *subscribe = decoded;
+  return LG_NET_PARSE_OK;
+}
+
 static bool audioSampleFormatKnown(LGNetAudioSampleFormat format)
 {
   return format >= LG_NET_AUDIO_SAMPLE_S16_LE &&
@@ -1177,6 +2332,9 @@ bool lgNetAudioFormatValid(const LGNetAudioFormat * format)
     format->framesPerPacket <= LG_NET_AUDIO_MAX_PACKET_FRAMES &&
     format->maxPacketFrames >= format->framesPerPacket &&
     format->maxPacketFrames <= LG_NET_AUDIO_MAX_PACKET_FRAMES &&
+    (format->flags & LG_NET_AUDIO_FORMAT_INTERLEAVED) &&
+    (!format->channelMask ||
+      bitCount32(format->channelMask) == format->channels) &&
     !(format->flags & ~AUDIO_FORMAT_FLAGS);
 }
 
@@ -1356,6 +2514,8 @@ bool lgNetAudioStateValid(const LGNetAudioState * state)
   return state && state->streamID &&
     audioDirectionKnown(state->direction) && audioStateKnown(state->state) &&
     state->stateSequence && !(state->flags & ~AUDIO_STATE_FLAGS) &&
+    state->volumeMillibels >= LG_NET_AUDIO_VOLUME_MIN_MILLIBELS &&
+    state->volumeMillibels <= LG_NET_AUDIO_VOLUME_MAX_MILLIBELS &&
     (!(state->flags & LG_NET_AUDIO_STATE_FORMAT_ACTIVE) || state->formatEpoch);
 }
 
@@ -1475,9 +2635,275 @@ LGNetParseResult lgNetAudioClockFeedbackDecode(
   return LG_NET_PARSE_OK;
 }
 
+bool lgNetAudioControlValid(const LGNetAudioControl * control)
+{
+  return control && control->streamID &&
+    audioDirectionKnown(control->direction) &&
+    !(control->flags & ~AUDIO_CONTROL_FLAGS) && control->sequence;
+}
+
+bool lgNetAudioControlEncode(
+    void * data, size_t size, const LGNetAudioControl * control)
+{
+  if (!data || size < LG_NET_AUDIO_CONTROL_WIRE_SIZE ||
+      !lgNetAudioControlValid(control))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU32 (&writer, control->streamID)    &&
+    lgNetWriterU16 (&writer, control->direction)   &&
+    lgNetWriterU16 (&writer, control->flags)       &&
+    lgNetWriterU64 (&writer, control->sequence)    &&
+    lgNetWriterU64 (&writer, control->formatEpoch) &&
+    lgNetWriterU32 (&writer, control->detail)      &&
+    lgNetWriterZero(&writer, 4)                    &&
+    lgNetWriterSize(&writer) == LG_NET_AUDIO_CONTROL_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetAudioControlDecode(
+    LGNetAudioControl * control, const void * data, size_t size)
+{
+  if (!control || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_AUDIO_CONTROL_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetAudioControl decoded;
+  LGNetReader       reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU32 (&reader, &decoded.streamID)    ||
+      !lgNetReaderU16 (&reader, &decoded.direction)   ||
+      !lgNetReaderU16 (&reader, &decoded.flags)       ||
+      !lgNetReaderU64 (&reader, &decoded.sequence)    ||
+      !lgNetReaderU64 (&reader, &decoded.formatEpoch) ||
+      !lgNetReaderU32 (&reader, &decoded.detail)      ||
+      !lgNetReaderZero(&reader, 4))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_AUDIO_CONTROL_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetAudioControlValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *control = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+size_t lgNetAudioVolumeSize(const LGNetAudioVolume * volume)
+{
+  size_t size;
+  return volume && variableSize(LG_NET_AUDIO_VOLUME_HEADER_WIRE_SIZE,
+    (size_t)volume->channelCount * sizeof(volume->volumeMillibels[0]),
+    sizeof(volume->volumeMillibels), &size) ? size : 0;
+}
+
+bool lgNetAudioVolumeValid(const LGNetAudioVolume * volume)
+{
+  if (!volume || !volume->streamID ||
+      !audioDirectionKnown(volume->direction) || !volume->channelCount ||
+      volume->channelCount > LG_NET_AUDIO_MAX_CHANNELS || !volume->sequence ||
+      (volume->channelMask &&
+        bitCount32(volume->channelMask) != volume->channelCount))
+    return false;
+
+  for (uint16_t i = 0; i < volume->channelCount; ++i)
+  {
+    if (volume->volumeMillibels[i] < LG_NET_AUDIO_VOLUME_MIN_MILLIBELS ||
+        volume->volumeMillibels[i] > LG_NET_AUDIO_VOLUME_MAX_MILLIBELS)
+      return false;
+  }
+
+  return true;
+}
+
+bool lgNetAudioVolumeEncode(
+    void * data, size_t size, const LGNetAudioVolume * volume)
+{
+  const size_t needed = lgNetAudioVolumeSize(volume);
+  if (!data || !needed || size < needed || !lgNetAudioVolumeValid(volume))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  if (!lgNetWriterU32 (&writer, volume->streamID)     ||
+      !lgNetWriterU16 (&writer, volume->direction)    ||
+      !lgNetWriterU16 (&writer, volume->channelCount) ||
+      !lgNetWriterU64 (&writer, volume->sequence)     ||
+      !lgNetWriterU32 (&writer, volume->channelMask)  ||
+      !lgNetWriterZero(&writer, 4))
+    return false;
+
+  for (uint16_t i = 0; i < volume->channelCount; ++i)
+  {
+    if (!lgNetWriterI32(&writer, volume->volumeMillibels[i]))
+      return false;
+  }
+
+  return lgNetWriterSize(&writer) == needed;
+}
+
+LGNetParseResult lgNetAudioVolumeDecode(
+    LGNetAudioVolume * volume, const void * data, size_t size)
+{
+  if (!volume || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_AUDIO_VOLUME_HEADER_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetAudioVolume decoded;
+  LGNetReader      reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU32 (&reader, &decoded.streamID)     ||
+      !lgNetReaderU16 (&reader, &decoded.direction)    ||
+      !lgNetReaderU16 (&reader, &decoded.channelCount) ||
+      !lgNetReaderU64 (&reader, &decoded.sequence)     ||
+      !lgNetReaderU32 (&reader, &decoded.channelMask)  ||
+      !lgNetReaderZero(&reader, 4))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  size_t                 expected;
+  const LGNetParseResult result = variableDecodeSize(
+    LG_NET_AUDIO_VOLUME_HEADER_WIRE_SIZE,
+    (size_t)decoded.channelCount * sizeof(decoded.volumeMillibels[0]),
+    sizeof(decoded.volumeMillibels), size, &expected);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  for (uint16_t i = 0; i < decoded.channelCount; ++i)
+  {
+    if (!lgNetReaderI32(&reader, &decoded.volumeMillibels[i]))
+      return LG_NET_PARSE_INVALID_VALUE;
+  }
+  if (lgNetReaderConsumed(&reader) != expected ||
+      !lgNetAudioVolumeValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *volume = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+bool lgNetAudioMuteValid(const LGNetAudioMute * mute)
+{
+  return mute && mute->streamID && audioDirectionKnown(mute->direction) &&
+    mute->muted <= 1 && mute->sequence;
+}
+
+bool lgNetAudioMuteEncode(
+    void * data, size_t size, const LGNetAudioMute * mute)
+{
+  if (!data || size < LG_NET_AUDIO_MUTE_WIRE_SIZE ||
+      !lgNetAudioMuteValid(mute))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU32 (&writer, mute->streamID)    &&
+    lgNetWriterU16 (&writer, mute->direction)   &&
+    lgNetWriterU8  (&writer, mute->muted)       &&
+    lgNetWriterZero(&writer, 1)                 &&
+    lgNetWriterU64 (&writer, mute->sequence)    &&
+    lgNetWriterU32 (&writer, mute->channelMask) &&
+    lgNetWriterZero(&writer, 4)                 &&
+    lgNetWriterSize(&writer) == LG_NET_AUDIO_MUTE_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetAudioMuteDecode(
+    LGNetAudioMute * mute, const void * data, size_t size)
+{
+  if (!mute || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_AUDIO_MUTE_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetAudioMute decoded;
+  LGNetReader    reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU32 (&reader, &decoded.streamID)    ||
+      !lgNetReaderU16 (&reader, &decoded.direction)   ||
+      !lgNetReaderU8  (&reader, &decoded.muted)       ||
+      !lgNetReaderZero(&reader, 1)                    ||
+      !lgNetReaderU64 (&reader, &decoded.sequence)    ||
+      !lgNetReaderU32 (&reader, &decoded.channelMask) ||
+      !lgNetReaderZero(&reader, 4))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_AUDIO_MUTE_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetAudioMuteValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *mute = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+bool lgNetAudioBarrierValid(const LGNetAudioBarrier * barrier)
+{
+  return barrier && barrier->streamID &&
+    audioDirectionKnown(barrier->direction) && barrier->barrierID &&
+    barrier->stateSequence;
+}
+
+bool lgNetAudioBarrierEncode(
+    void * data, size_t size, const LGNetAudioBarrier * barrier)
+{
+  if (!data || size < LG_NET_AUDIO_BARRIER_WIRE_SIZE ||
+      !lgNetAudioBarrierValid(barrier))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU32 (&writer, barrier->streamID)      &&
+    lgNetWriterU16 (&writer, barrier->direction)     &&
+    lgNetWriterZero(&writer, 2)                      &&
+    lgNetWriterU64 (&writer, barrier->barrierID)     &&
+    lgNetWriterU64 (&writer, barrier->stateSequence) &&
+    lgNetWriterSize(&writer) == LG_NET_AUDIO_BARRIER_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetAudioBarrierDecode(
+    LGNetAudioBarrier * barrier, const void * data, size_t size)
+{
+  if (!barrier || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_AUDIO_BARRIER_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetAudioBarrier decoded;
+  LGNetReader       reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU32 (&reader, &decoded.streamID)      ||
+      !lgNetReaderU16 (&reader, &decoded.direction)     ||
+      !lgNetReaderZero(&reader, 2)                      ||
+      !lgNetReaderU64 (&reader, &decoded.barrierID)     ||
+      !lgNetReaderU64 (&reader, &decoded.stateSequence))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_AUDIO_BARRIER_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetAudioBarrierValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *barrier = decoded;
+  return LG_NET_PARSE_OK;
+}
+
 bool lgNetClipboardClaimValid(const LGNetClipboardClaim * claim)
 {
   return claim && claim->ownerID && claim->claimEpoch && claim->leaseMs &&
+    claim->leaseMs <= LG_NET_CLIPBOARD_MAX_LEASE_MS &&
     claim->flags && !(claim->flags & ~CLIPBOARD_CLAIM_FLAGS);
 }
 
@@ -1524,6 +2950,122 @@ LGNetParseResult lgNetClipboardClaimDecode(
     return LG_NET_PARSE_INVALID_VALUE;
 
   *claim = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+bool lgNetClipboardControlValid(const LGNetClipboardControl * control)
+{
+  return control && control->ownerID && control->claimEpoch && control->serial;
+}
+
+bool lgNetClipboardControlEncode(
+    void * data, size_t size, const LGNetClipboardControl * control)
+{
+  if (!data || size < LG_NET_CLIPBOARD_CONTROL_WIRE_SIZE ||
+      !lgNetClipboardControlValid(control))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, control->ownerID)    &&
+    lgNetWriterU64(&writer, control->claimEpoch) &&
+    lgNetWriterU64(&writer, control->serial)     &&
+    lgNetWriterU64(&writer, control->offerID)    &&
+    lgNetWriterSize(&writer) == LG_NET_CLIPBOARD_CONTROL_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetClipboardControlDecode(
+    LGNetClipboardControl * control, const void * data, size_t size)
+{
+  if (!control || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CLIPBOARD_CONTROL_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetClipboardControl decoded;
+  LGNetReader           reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.ownerID)    ||
+      !lgNetReaderU64(&reader, &decoded.claimEpoch) ||
+      !lgNetReaderU64(&reader, &decoded.serial)     ||
+      !lgNetReaderU64(&reader, &decoded.offerID))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_CLIPBOARD_CONTROL_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetClipboardControlValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *control = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+static bool clipboardClaimCodeKnown(LGNetClipboardClaimCode status)
+{
+  return status >= LG_NET_CLIPBOARD_CLAIM_ACCEPTED &&
+    status <= LG_NET_CLIPBOARD_CLAIM_ERROR;
+}
+
+bool lgNetClipboardClaimStatusValid(
+    const LGNetClipboardClaimStatus * status)
+{
+  return status && status->claimEpoch && status->serial &&
+    clipboardClaimCodeKnown(status->status) &&
+    !(status->flags & ~CLIPBOARD_CLAIM_FLAGS) &&
+    status->leaseRemainingMs <= LG_NET_CLIPBOARD_MAX_LEASE_MS;
+}
+
+bool lgNetClipboardClaimStatusEncode(
+    void * data, size_t size, const LGNetClipboardClaimStatus * status)
+{
+  if (!data || size < LG_NET_CLIPBOARD_CLAIM_STATUS_WIRE_SIZE ||
+      !lgNetClipboardClaimStatusValid(status))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, status->claimEpoch)       &&
+    lgNetWriterU64(&writer, status->serial)           &&
+    lgNetWriterU32(&writer, status->status)           &&
+    lgNetWriterU32(&writer, status->flags)            &&
+    lgNetWriterU32(&writer, status->leaseRemainingMs) &&
+    lgNetWriterU32(&writer, status->detail)           &&
+    lgNetWriterSize(&writer) == LG_NET_CLIPBOARD_CLAIM_STATUS_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetClipboardClaimStatusDecode(
+    LGNetClipboardClaimStatus * status, const void * data, size_t size)
+{
+  if (!status || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CLIPBOARD_CLAIM_STATUS_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetClipboardClaimStatus decoded;
+  LGNetReader              reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.claimEpoch)       ||
+      !lgNetReaderU64(&reader, &decoded.serial)           ||
+      !lgNetReaderU32(&reader, &decoded.status)           ||
+      !lgNetReaderU32(&reader, &decoded.flags)            ||
+      !lgNetReaderU32(&reader, &decoded.leaseRemainingMs) ||
+      !lgNetReaderU32(&reader, &decoded.detail))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_CLIPBOARD_CLAIM_STATUS_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetClipboardClaimStatusValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *status = decoded;
   return LG_NET_PARSE_OK;
 }
 
@@ -1749,6 +3291,58 @@ LGNetParseResult lgNetClipboardChunkDecode(
   return LG_NET_PARSE_OK;
 }
 
+bool lgNetClipboardTransferValid(const LGNetClipboardTransfer * transfer)
+{
+  return transfer && transfer->requestID && transfer->offerID &&
+    transfer->processedLength <= transfer->totalLength;
+}
+
+bool lgNetClipboardTransferEncode(
+    void * data, size_t size, const LGNetClipboardTransfer * transfer)
+{
+  if (!data || size < LG_NET_CLIPBOARD_TRANSFER_WIRE_SIZE ||
+      !lgNetClipboardTransferValid(transfer))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, transfer->requestID)       &&
+    lgNetWriterU64(&writer, transfer->offerID)         &&
+    lgNetWriterU64(&writer, transfer->totalLength)     &&
+    lgNetWriterU64(&writer, transfer->processedLength) &&
+    lgNetWriterSize(&writer) == LG_NET_CLIPBOARD_TRANSFER_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetClipboardTransferDecode(
+    LGNetClipboardTransfer * transfer, const void * data, size_t size)
+{
+  if (!transfer || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CLIPBOARD_TRANSFER_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetClipboardTransfer decoded;
+  LGNetReader            reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.requestID)       ||
+      !lgNetReaderU64(&reader, &decoded.offerID)         ||
+      !lgNetReaderU64(&reader, &decoded.totalLength)     ||
+      !lgNetReaderU64(&reader, &decoded.processedLength))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_CLIPBOARD_TRANSFER_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetClipboardTransferValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *transfer = decoded;
+  return LG_NET_PARSE_OK;
+}
+
 static bool clipboardStatusKnown(LGNetClipboardStatusCode status)
 {
   return status >= LG_NET_CLIPBOARD_STATUS_OK &&
@@ -1886,6 +3480,70 @@ LGNetParseResult lgNetFileOfferDecode(
   return LG_NET_PARSE_OK;
 }
 
+bool lgNetFileLeaseValid(const LGNetFileLease * lease)
+{
+  if (!lease || !lease->clientID || !lease->offerID ||
+      !(lease->flags & LG_NET_FILE_LEASE_READ) ||
+      (lease->flags & ~FILE_LEASE_FLAGS))
+    return false;
+
+  if (lease->flags & LG_NET_FILE_LEASE_ACQUIRED)
+    return lease->leaseEpoch && lease->leaseMs &&
+      lease->leaseMs <= LG_NET_FILE_MAX_LEASE_MS;
+
+  return (!lease->leaseEpoch && lease->leaseMs &&
+      lease->leaseMs <= LG_NET_FILE_MAX_LEASE_MS) ||
+    (lease->leaseEpoch && !lease->leaseMs);
+}
+
+bool lgNetFileLeaseEncode(
+    void * data, size_t size, const LGNetFileLease * lease)
+{
+  if (!data || size < LG_NET_FILE_LEASE_WIRE_SIZE ||
+      !lgNetFileLeaseValid(lease))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, lease->clientID)   &&
+    lgNetWriterU64(&writer, lease->offerID)    &&
+    lgNetWriterU64(&writer, lease->leaseEpoch) &&
+    lgNetWriterU32(&writer, lease->leaseMs)    &&
+    lgNetWriterU32(&writer, lease->flags)      &&
+    lgNetWriterSize(&writer) == LG_NET_FILE_LEASE_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetFileLeaseDecode(
+    LGNetFileLease * lease, const void * data, size_t size)
+{
+  if (!lease || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_FILE_LEASE_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetFileLease decoded;
+  LGNetReader    reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.clientID)   ||
+      !lgNetReaderU64(&reader, &decoded.offerID)    ||
+      !lgNetReaderU64(&reader, &decoded.leaseEpoch) ||
+      !lgNetReaderU32(&reader, &decoded.leaseMs)    ||
+      !lgNetReaderU32(&reader, &decoded.flags))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_FILE_LEASE_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetFileLeaseValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *lease = decoded;
+  return LG_NET_PARSE_OK;
+}
+
 static bool fileEntryTypeKnown(LGNetFileEntryType type)
 {
   return type >= LG_NET_FILE_ENTRY_REGULAR &&
@@ -2000,10 +3658,13 @@ LGNetParseResult lgNetFileEntryDecode(
 bool lgNetFileRequestValid(const LGNetFileRequest * request)
 {
   return request && request->requestID && request->offerID &&
-    request->entryID && request->length &&
-    request->length <= LG_NET_FILE_MAX_CHUNK_LENGTH && request->flags &&
+    request->entryID && request->flags &&
     !(request->flags & ~FILE_REQUEST_FLAGS) &&
-    request->offset <= UINT64_MAX - request->length;
+    ((request->flags & LG_NET_FILE_REQUEST_DATA) ?
+      request->length &&
+        request->length <= LG_NET_FILE_MAX_CHUNK_LENGTH &&
+        request->offset <= UINT64_MAX - request->length :
+      !request->offset && !request->length);
 }
 
 bool lgNetFileRequestEncode(
@@ -2141,6 +3802,63 @@ LGNetParseResult lgNetFileChunkDecode(
   return LG_NET_PARSE_OK;
 }
 
+bool lgNetFileTransferValid(const LGNetFileTransfer * transfer)
+{
+  return transfer && transfer->requestID && transfer->offerID &&
+    transfer->entryID && transfer->offset <= transfer->totalLength &&
+    transfer->processedLength <= transfer->totalLength - transfer->offset;
+}
+
+bool lgNetFileTransferEncode(
+    void * data, size_t size, const LGNetFileTransfer * transfer)
+{
+  if (!data || size < LG_NET_FILE_TRANSFER_WIRE_SIZE ||
+      !lgNetFileTransferValid(transfer))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, transfer->requestID)       &&
+    lgNetWriterU64(&writer, transfer->offerID)         &&
+    lgNetWriterU64(&writer, transfer->entryID)         &&
+    lgNetWriterU64(&writer, transfer->offset)          &&
+    lgNetWriterU64(&writer, transfer->totalLength)     &&
+    lgNetWriterU64(&writer, transfer->processedLength) &&
+    lgNetWriterSize(&writer) == LG_NET_FILE_TRANSFER_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetFileTransferDecode(
+    LGNetFileTransfer * transfer, const void * data, size_t size)
+{
+  if (!transfer || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_FILE_TRANSFER_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetFileTransfer decoded;
+  LGNetReader       reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.requestID)       ||
+      !lgNetReaderU64(&reader, &decoded.offerID)         ||
+      !lgNetReaderU64(&reader, &decoded.entryID)         ||
+      !lgNetReaderU64(&reader, &decoded.offset)          ||
+      !lgNetReaderU64(&reader, &decoded.totalLength)     ||
+      !lgNetReaderU64(&reader, &decoded.processedLength))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_FILE_TRANSFER_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetFileTransferValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *transfer = decoded;
+  return LG_NET_PARSE_OK;
+}
+
 static bool fileStatusKnown(LGNetFileStatusCode status)
 {
   return status >= LG_NET_FILE_STATUS_OK &&
@@ -2149,7 +3867,7 @@ static bool fileStatusKnown(LGNetFileStatusCode status)
 
 bool lgNetFileStatusValid(const LGNetFileStatus * status)
 {
-  return status && status->requestID && status->offerID && status->entryID &&
+  return status && status->requestID && status->offerID &&
     fileStatusKnown(status->status);
 }
 
