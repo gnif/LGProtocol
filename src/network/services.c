@@ -492,7 +492,7 @@ LGNetParseResult lgNetCoreGuestInfoDecode(
     return LG_NET_PARSE_INVALID_LENGTH;
   variableLength = (size_t)decoded.versionLength + decoded.osNameLength +
     decoded.captureLength + decoded.cpuModelLength;
-  result = variableDecodeSize(LG_NET_CORE_GUEST_INFO_HEADER_WIRE_SIZE,
+  result         = variableDecodeSize(LG_NET_CORE_GUEST_INFO_HEADER_WIRE_SIZE,
     variableLength, LG_NET_CORE_GUEST_INFO_MAX_VARIABLE_LENGTH,
     size, &expected);
   if (result != LG_NET_PARSE_OK)

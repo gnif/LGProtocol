@@ -223,6 +223,20 @@ LGNetParseResult lgNetPacketDecode(LGNetPacketView * packet,
   return LG_NET_PARSE_OK;
 }
 
+uint16_t lgNetCoreVersionForProtocol(uint16_t protocolVersion)
+{
+  switch (protocolVersion)
+  {
+    case LG_NET_PROTOCOL_VERSION_INITIAL:
+      return LG_NET_CORE_VERSION_INITIAL;
+
+    case LG_NET_PROTOCOL_VERSION_GUEST_INFO:
+      return LG_NET_CORE_VERSION_GUEST_INFO;
+  }
+
+  return 0;
+}
+
 bool lgNetServiceKnown(LGNetService service)
 {
   return service >= LG_NET_SERVICE_CORE && service <= LG_NET_SERVICE_CONTROL;

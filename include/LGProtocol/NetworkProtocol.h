@@ -40,8 +40,10 @@ extern "C" {
 #define LG_NET_MAX_PAYLOAD_LENGTH             (64U * 1024U * 1024U)
 #define LG_NET_MESSAGE_VERSION_CURRENT        1U
 #define LG_NET_MESSAGE_VERSION_INITIAL        1U
-#define LG_NET_PROTOCOL_VERSION_CURRENT       1U
-#define LG_NET_PROTOCOL_VERSION_MIN           1U
+#define LG_NET_PROTOCOL_VERSION_INITIAL       1U
+#define LG_NET_PROTOCOL_VERSION_GUEST_INFO    2U
+#define LG_NET_PROTOCOL_VERSION_CURRENT       LG_NET_PROTOCOL_VERSION_GUEST_INFO
+#define LG_NET_PROTOCOL_VERSION_MIN           LG_NET_PROTOCOL_VERSION_INITIAL
 #define LG_NET_PROTOCOL_VERSION_MAX           LG_NET_PROTOCOL_VERSION_CURRENT
 #define LG_NET_MAX_CAPABILITY_RECORDS         64U
 #define LG_NET_HELLO_NONCE_LENGTH             32U
@@ -57,7 +59,7 @@ extern "C" {
 #define LG_NET_CORE_VERSION_INITIAL       1U
 #define LG_NET_CORE_VERSION_GUEST_INFO    2U
 #define LG_NET_CORE_VERSION_CURRENT       LG_NET_CORE_VERSION_GUEST_INFO
-#define LG_NET_CORE_VERSION_MIN           LG_NET_CORE_VERSION_GUEST_INFO
+#define LG_NET_CORE_VERSION_MIN           LG_NET_CORE_VERSION_INITIAL
 #define LG_NET_CORE_VERSION_MAX           LG_NET_CORE_VERSION_CURRENT
 #define LG_NET_RECOVERY_VERSION_CURRENT   1U
 #define LG_NET_RECOVERY_VERSION_MIN       1U
@@ -459,6 +461,7 @@ bool lgNetPacketEncode(void * data, size_t size,
 LGNetParseResult lgNetPacketDecode(LGNetPacketView * packet,
   const void * data, size_t size);
 
+uint16_t lgNetCoreVersionForProtocol(uint16_t protocolVersion);
 bool lgNetServiceKnown(LGNetService service);
 bool lgNetMessageKnown(LGNetService service, uint16_t messageType);
 
