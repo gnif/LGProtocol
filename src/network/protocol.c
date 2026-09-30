@@ -251,7 +251,7 @@ bool lgNetMessageKnown(LGNetService service, uint16_t messageType)
       return messageType <= LG_NET_INPUT_MESSAGE_KEYBOARD_LEDS;
 
     case LG_NET_SERVICE_AUDIO:
-      return messageType <= LG_NET_AUDIO_MESSAGE_STATE_ACK;
+      return messageType <= LG_NET_AUDIO_MESSAGE_CLOCK_STATE;
 
     case LG_NET_SERVICE_CLIPBOARD:
       return messageType <= LG_NET_CLIPBOARD_MESSAGE_STATUS;
