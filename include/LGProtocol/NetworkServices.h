@@ -1458,7 +1458,8 @@ LGNetClipboardChunk;
 
 /* LG_NET_CLIPBOARD_MESSAGE_DATA_BEGIN, DATA_END, DATA_READY and CANCEL.
  * processedLength is zero for BEGIN/READY and contains the terminal byte
- * count for END/CANCEL. */
+ * count for END/CANCEL. BEGIN, every DATA_CHUNK, and END for one request use
+ * one delivery route so their ordering is preserved. */
 typedef struct LGNetClipboardTransfer
 {
   uint64_t requestID;
@@ -1616,7 +1617,9 @@ typedef struct LGNetFileChunk
 LGNetFileChunk;
 
 /* LG_NET_FILE_MESSAGE_DATA_BEGIN, DATA_END, DATA_READY and CANCEL.
- * processedLength is relative to offset and must fit within totalLength. */
+ * processedLength is relative to offset and must fit within totalLength.
+ * BEGIN, every DATA_CHUNK, and END for one request use one delivery route so
+ * their ordering is preserved. */
 typedef struct LGNetFileTransfer
 {
   uint64_t requestID;
