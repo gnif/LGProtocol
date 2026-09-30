@@ -570,9 +570,10 @@ enum
 
 /* One encoded codec block may span multiple fragments. frameOffset locates
  * payload in the complete encoded frame while blockOffset locates the same
- * bytes within blockIndex. Version 2 supports exact duplicate recovery
- * fragments only; the parity value is reserved for a future wire version.
- * recoveryType and recoveryGroup are non-zero for recovery fragments;
+ * bytes within blockIndex. All bulk fragments for a frame use the same
+ * ordered video stream. Version 2 supports exact duplicate recovery fragments
+ * only; the parity value is reserved for a future wire version. recoveryType
+ * and recoveryGroup are non-zero for recovery fragments;
  * recoveryIndex/recoveryCount identify that fragment's position in the
  * recovery group. checksum is CRC-32C over payloadLength bytes and is zero
  * unless LG_NET_VIDEO_FRAGMENT_CHECKSUM is set. */
