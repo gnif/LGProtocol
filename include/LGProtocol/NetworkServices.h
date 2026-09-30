@@ -40,6 +40,8 @@ extern "C" {
 /* Fixed boundaries must not move when a service's current version changes. */
 #define LG_NET_VIDEO_PYROWAVE_INTRODUCED_SERVICE_VERSION  1U
 #define LG_NET_CURSOR_SHAPE_INTRODUCED_SERVICE_VERSION    1U
+#define LG_NET_CURSOR_COLOR_TRANSFORM_INTRODUCED_SERVICE_VERSION \
+  2U
 #define LG_NET_INPUT_LEDS_INTRODUCED_SERVICE_VERSION      1U
 #define LG_NET_AUDIO_PCM_INTRODUCED_SERVICE_VERSION       1U
 #define LG_NET_CLIPBOARD_CHUNK_INTRODUCED_SERVICE_VERSION 1U
@@ -75,6 +77,14 @@ extern "C" {
 #define LG_NET_CURSOR_MAX_SHAPE_LENGTH            (16U * 1024U * 1024U)
 #define LG_NET_CURSOR_POSITION_WIRE_SIZE          40U
 #define LG_NET_CURSOR_SHAPE_HEADER_WIRE_SIZE      40U
+#define LG_NET_CURSOR_COLOR_TRANSFORM_HEADER_WIRE_SIZE   72U
+#define LG_NET_CURSOR_COLOR_MATRIX_FLOATS                12U
+#define LG_NET_CURSOR_COLOR_LUT_ENTRIES                  4096U
+#define LG_NET_CURSOR_COLOR_LUT_CHANNELS                 4U
+#define LG_NET_CURSOR_COLOR_LUT_FLOATS                   \
+  (LG_NET_CURSOR_COLOR_LUT_ENTRIES * LG_NET_CURSOR_COLOR_LUT_CHANNELS)
+#define LG_NET_CURSOR_COLOR_LUT_BYTES                    \
+  (LG_NET_CURSOR_COLOR_LUT_FLOATS * sizeof(float))
 
 #define LG_NET_INPUT_CLAIM_WIRE_SIZE              24U
 #define LG_NET_INPUT_STATUS_WIRE_SIZE             32U
@@ -161,6 +171,12 @@ extern "C" {
 #define LG_NET_FILE_TRANSFER_WIRE_SIZE            48U
 #define LG_NET_FILE_MAX_LEASE_MS                  300000U
 
+#define LG_NET_CONTROL_CURSOR_POSITION_WIRE_SIZE  16U
+#define LG_NET_CONTROL_DISPLAY_SIZE_WIRE_SIZE     16U
+#define LG_NET_CONTROL_FRAME_SCHEDULE_WIRE_SIZE   56U
+#define LG_NET_CONTROL_STATUS_WIRE_SIZE           16U
+#define LG_NET_CONTROL_MAX_LEASE_MS               60000U
+
 typedef uint32_t LGNetCoreSessionFlags;
 
 enum
@@ -207,6 +223,7 @@ enum
   LG_NET_CORE_STATUS_FILE_AVAILABLE      = 1U << 4,
   LG_NET_CORE_STATUS_CURSOR_AVAILABLE    = 1U << 5,
   LG_NET_CORE_STATUS_RECOVERY_AVAILABLE  = 1U << 6,
+  LG_NET_CORE_STATUS_CONTROL_AVAILABLE   = 1U << 7,
 };
 
 /* LG_NET_CORE_MESSAGE_STATUS. */
@@ -773,6 +790,30 @@ typedef struct LGNetCursorTransform
 }
 LGNetCursorTransform;
 
+typedef uint32_t LGNetCursorColorTransformFlags;
+
+enum
+{
+  LG_NET_CURSOR_COLOR_TRANSFORM_MATRIX = 1U << 0,
+  LG_NET_CURSOR_COLOR_TRANSFORM_LUT    = 1U << 1,
+};
+
+/* LG_NET_CURSOR_MESSAGE_COLOR_TRANSFORM. Matrix is a row-major 3x4 matrix.
+ * The optional LUT is 4096 RGBA float entries in entry-major order. Float
+ * values are encoded as their IEEE-754 binary32 bit patterns in little-endian
+ * order. An update with no transform flags still carries the cursor SDR white
+ * level. */
+typedef struct LGNetCursorColorTransform
+{
+  uint64_t                       updateID;
+  LGNetCursorColorTransformFlags flags;
+  uint32_t                       sdrWhiteLevel;
+  float                          matrix[LG_NET_CURSOR_COLOR_MATRIX_FLOATS];
+  float                          scalar;
+  const uint8_t                * lut;
+}
+LGNetCursorColorTransform;
+
 typedef uint32_t LGNetCursorStatusCode;
 
 enum
@@ -794,6 +835,70 @@ typedef struct LGNetCursorStatus
   uint32_t              detail;
 }
 LGNetCursorStatus;
+
+typedef uint32_t LGNetControlFrameScheduleFlags;
+
+enum
+{
+  LG_NET_CONTROL_FRAME_SCHEDULE_ACTIVE    = 1U << 0,
+  LG_NET_CONTROL_FRAME_SCHEDULE_RELEASE   = 1U << 1,
+  LG_NET_CONTROL_FRAME_SCHEDULE_RESET     = 1U << 2,
+  LG_NET_CONTROL_FRAME_SCHEDULE_IMMEDIATE = 1U << 3,
+};
+
+/* Client-to-server control requests. controlID must match the envelope
+ * request ID and is returned by LGNetControlStatus. */
+typedef struct LGNetControlCursorPosition
+{
+  uint64_t controlID;
+  int32_t  x;
+  int32_t  y;
+}
+LGNetControlCursorPosition;
+
+typedef struct LGNetControlDisplaySize
+{
+  uint64_t controlID;
+  uint32_t width;
+  uint32_t height;
+}
+LGNetControlDisplaySize;
+
+typedef struct LGNetControlFrameSchedule
+{
+  uint64_t                       controlID;
+  uint32_t                       generation;
+  LGNetControlFrameScheduleFlags flags;
+  uint64_t                       periodNs;
+  uint64_t                       targetSlackNs;
+  int64_t                        phaseErrorNs;
+  uint32_t                       feedbackFrameSerial;
+  uint32_t                       feedbackScheduleEpoch;
+  uint32_t                       feedbackDeadlineSerial;
+  uint32_t                       leaseMs;
+}
+LGNetControlFrameSchedule;
+
+typedef uint32_t LGNetControlStatusCode;
+
+enum
+{
+  LG_NET_CONTROL_STATUS_APPLIED     = 1,
+  LG_NET_CONTROL_STATUS_PENDING     = 2,
+  LG_NET_CONTROL_STATUS_BUSY        = 3,
+  LG_NET_CONTROL_STATUS_UNSUPPORTED = 4,
+  LG_NET_CONTROL_STATUS_STALE       = 5,
+  LG_NET_CONTROL_STATUS_INVALID     = 6,
+  LG_NET_CONTROL_STATUS_ERROR       = 7,
+};
+
+typedef struct LGNetControlStatus
+{
+  uint64_t               controlID;
+  LGNetControlStatusCode status;
+  uint32_t               detail;
+}
+LGNetControlStatus;
 
 typedef uint32_t LGNetInputClaimFlags;
 
@@ -1592,11 +1697,50 @@ bool lgNetCursorTransformEncode(
 LGNetParseResult lgNetCursorTransformDecode(
   LGNetCursorTransform * transform, const void * data, size_t size);
 
+size_t lgNetCursorColorTransformSize(
+  const LGNetCursorColorTransform * transform);
+bool lgNetCursorColorLUTEncode(void * data, size_t size,
+  const float lut[LG_NET_CURSOR_COLOR_LUT_FLOATS]);
+bool lgNetCursorColorLUTDecode(
+  float lut[LG_NET_CURSOR_COLOR_LUT_FLOATS], const void * data, size_t size);
+bool lgNetCursorColorTransformValid(
+  const LGNetCursorColorTransform * transform);
+bool lgNetCursorColorTransformEncode(void * data, size_t size,
+  const LGNetCursorColorTransform * transform);
+LGNetParseResult lgNetCursorColorTransformDecode(
+  LGNetCursorColorTransform * transform, const void * data, size_t size);
+
 bool lgNetCursorStatusValid(const LGNetCursorStatus * status);
 bool lgNetCursorStatusEncode(
   void * data, size_t size, const LGNetCursorStatus * status);
 LGNetParseResult lgNetCursorStatusDecode(
   LGNetCursorStatus * status, const void * data, size_t size);
+
+bool lgNetControlCursorPositionValid(
+  const LGNetControlCursorPosition * position);
+bool lgNetControlCursorPositionEncode(void * data, size_t size,
+  const LGNetControlCursorPosition * position);
+LGNetParseResult lgNetControlCursorPositionDecode(
+  LGNetControlCursorPosition * position, const void * data, size_t size);
+
+bool lgNetControlDisplaySizeValid(const LGNetControlDisplaySize * display);
+bool lgNetControlDisplaySizeEncode(void * data, size_t size,
+  const LGNetControlDisplaySize * display);
+LGNetParseResult lgNetControlDisplaySizeDecode(
+  LGNetControlDisplaySize * display, const void * data, size_t size);
+
+bool lgNetControlFrameScheduleValid(
+  const LGNetControlFrameSchedule * schedule);
+bool lgNetControlFrameScheduleEncode(void * data, size_t size,
+  const LGNetControlFrameSchedule * schedule);
+LGNetParseResult lgNetControlFrameScheduleDecode(
+  LGNetControlFrameSchedule * schedule, const void * data, size_t size);
+
+bool lgNetControlStatusValid(const LGNetControlStatus * status);
+bool lgNetControlStatusEncode(
+  void * data, size_t size, const LGNetControlStatus * status);
+LGNetParseResult lgNetControlStatusDecode(
+  LGNetControlStatus * status, const void * data, size_t size);
 
 bool lgNetInputClaimValid(const LGNetInputClaim * claim);
 bool lgNetInputClaimEncode(

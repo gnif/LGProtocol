@@ -225,7 +225,7 @@ LGNetParseResult lgNetPacketDecode(LGNetPacketView * packet,
 
 bool lgNetServiceKnown(LGNetService service)
 {
-  return service >= LG_NET_SERVICE_CORE && service <= LG_NET_SERVICE_USB;
+  return service >= LG_NET_SERVICE_CORE && service <= LG_NET_SERVICE_CONTROL;
 }
 
 bool lgNetMessageKnown(LGNetService service, uint16_t messageType)
@@ -245,7 +245,7 @@ bool lgNetMessageKnown(LGNetService service, uint16_t messageType)
       return messageType <= LG_NET_VIDEO_MESSAGE_STATUS;
 
     case LG_NET_SERVICE_CURSOR:
-      return messageType <= LG_NET_CURSOR_MESSAGE_STATUS;
+      return messageType <= LG_NET_CURSOR_MESSAGE_COLOR_TRANSFORM;
 
     case LG_NET_SERVICE_INPUT:
       return messageType <= LG_NET_INPUT_MESSAGE_KEYBOARD_LEDS;
@@ -261,6 +261,9 @@ bool lgNetMessageKnown(LGNetService service, uint16_t messageType)
 
     case LG_NET_SERVICE_USB:
       return messageType <= LG_NET_USB_MESSAGE_STATUS;
+
+    case LG_NET_SERVICE_CONTROL:
+      return messageType <= LG_NET_CONTROL_MESSAGE_STATUS;
   }
 
   return false;

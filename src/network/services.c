@@ -130,7 +130,8 @@ static const LGNetCoreStatusFlags CORE_STATUS_FLAGS =
   LG_NET_CORE_STATUS_CLIPBOARD_AVAILABLE |
   LG_NET_CORE_STATUS_FILE_AVAILABLE      |
   LG_NET_CORE_STATUS_CURSOR_AVAILABLE    |
-  LG_NET_CORE_STATUS_RECOVERY_AVAILABLE;
+  LG_NET_CORE_STATUS_RECOVERY_AVAILABLE  |
+  LG_NET_CORE_STATUS_CONTROL_AVAILABLE;
 
 static const LGNetRecoveryCapabilities RECOVERY_CAPABILITIES =
   LG_NET_RECOVERY_CAP_DISPLAY;
@@ -171,6 +172,16 @@ static const LGNetCursorTransformFlags CURSOR_TRANSFORM_FLAGS =
   LG_NET_CURSOR_TRANSFORM_MIRROR_X |
   LG_NET_CURSOR_TRANSFORM_MIRROR_Y;
 
+static const LGNetCursorColorTransformFlags CURSOR_COLOR_TRANSFORM_FLAGS =
+  LG_NET_CURSOR_COLOR_TRANSFORM_MATRIX |
+  LG_NET_CURSOR_COLOR_TRANSFORM_LUT;
+
+static const LGNetControlFrameScheduleFlags CONTROL_FRAME_SCHEDULE_FLAGS =
+  LG_NET_CONTROL_FRAME_SCHEDULE_ACTIVE    |
+  LG_NET_CONTROL_FRAME_SCHEDULE_RELEASE   |
+  LG_NET_CONTROL_FRAME_SCHEDULE_RESET     |
+  LG_NET_CONTROL_FRAME_SCHEDULE_IMMEDIATE;
+
 static const LGNetAudioDirectionMask AUDIO_DIRECTIONS =
   LG_NET_AUDIO_DIRECTIONS_PLAYBACK |
   LG_NET_AUDIO_DIRECTIONS_CAPTURE;
@@ -187,6 +198,40 @@ static const LGNetFileLeaseFlags FILE_LEASE_FLAGS =
   LG_NET_FILE_LEASE_READ      |
   LG_NET_FILE_LEASE_EXCLUSIVE |
   LG_NET_FILE_LEASE_ACQUIRED;
+
+static uint32_t floatBits(float value)
+{
+  uint32_t bits;
+  memcpy(&bits, &value, sizeof(bits));
+  return bits;
+}
+
+static float bitsFloat(uint32_t bits)
+{
+  float value;
+  memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
+static bool finiteFloat(float value)
+{
+  return (floatBits(value) & UINT32_C(0x7f800000)) !=
+    UINT32_C(0x7f800000);
+}
+
+static bool writerFloat(LGNetWriter * writer, float value)
+{
+  return finiteFloat(value) && lgNetWriterU32(writer, floatBits(value));
+}
+
+static bool readerFloat(LGNetReader * reader, float * value)
+{
+  uint32_t bits;
+  if (!value || !lgNetReaderU32(reader, &bits))
+    return false;
+  *value = bitsFloat(bits);
+  return finiteFloat(*value);
+}
 
 static bool variableSize(size_t headerSize, size_t payloadLength,
     size_t payloadLimit, size_t * wireSize)
@@ -248,7 +293,7 @@ static bool coreErrorKnown(LGNetCoreErrorCode code)
 
 static bool serviceKnown(LGNetService service)
 {
-  return service >= LG_NET_SERVICE_CORE && service <= LG_NET_SERVICE_USB;
+  return service >= LG_NET_SERVICE_CORE && service <= LG_NET_SERVICE_CONTROL;
 }
 
 size_t lgNetCoreSessionInfoSize(const LGNetCoreSessionInfo * info)
@@ -1748,6 +1793,155 @@ LGNetParseResult lgNetCursorTransformDecode(
   return LG_NET_PARSE_OK;
 }
 
+bool lgNetCursorColorLUTEncode(void * data, size_t size,
+    const float lut[LG_NET_CURSOR_COLOR_LUT_FLOATS])
+{
+  if (!data || size < LG_NET_CURSOR_COLOR_LUT_BYTES || !lut)
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  for (size_t index = 0; index < LG_NET_CURSOR_COLOR_LUT_FLOATS; ++index)
+    if (!writerFloat(&writer, lut[index]))
+      return false;
+  return lgNetWriterSize(&writer) == LG_NET_CURSOR_COLOR_LUT_BYTES;
+}
+
+bool lgNetCursorColorLUTDecode(
+    float lut[LG_NET_CURSOR_COLOR_LUT_FLOATS], const void * data, size_t size)
+{
+  if (!lut || !data || size != LG_NET_CURSOR_COLOR_LUT_BYTES)
+    return false;
+
+  LGNetReader reader;
+  lgNetReaderInit(&reader, data, size);
+  for (size_t index = 0; index < LG_NET_CURSOR_COLOR_LUT_FLOATS; ++index)
+    if (!readerFloat(&reader, &lut[index]))
+      return false;
+  return lgNetReaderConsumed(&reader) == LG_NET_CURSOR_COLOR_LUT_BYTES;
+}
+
+static bool cursorColorLUTValid(const uint8_t * data)
+{
+  if (!data)
+    return false;
+
+  LGNetReader reader;
+  lgNetReaderInit(&reader, data, LG_NET_CURSOR_COLOR_LUT_BYTES);
+  for (size_t index = 0; index < LG_NET_CURSOR_COLOR_LUT_FLOATS; ++index)
+  {
+    float value;
+    if (!readerFloat(&reader, &value))
+      return false;
+  }
+  return lgNetReaderConsumed(&reader) == LG_NET_CURSOR_COLOR_LUT_BYTES;
+}
+
+size_t lgNetCursorColorTransformSize(
+    const LGNetCursorColorTransform * transform)
+{
+  size_t wireSize;
+  const size_t lutSize = transform &&
+    (transform->flags & LG_NET_CURSOR_COLOR_TRANSFORM_LUT) ?
+      LG_NET_CURSOR_COLOR_LUT_BYTES : 0;
+  return transform && variableSize(
+      LG_NET_CURSOR_COLOR_TRANSFORM_HEADER_WIRE_SIZE,
+      lutSize, LG_NET_CURSOR_COLOR_LUT_BYTES, &wireSize) ? wireSize : 0;
+}
+
+bool lgNetCursorColorTransformValid(
+    const LGNetCursorColorTransform * transform)
+{
+  if (!transform || !transform->updateID || !transform->sdrWhiteLevel ||
+      transform->sdrWhiteLevel > 10000U ||
+      (transform->flags & ~CURSOR_COLOR_TRANSFORM_FLAGS) ||
+      !finiteFloat(transform->scalar) ||
+      (!!transform->lut !=
+        !!(transform->flags & LG_NET_CURSOR_COLOR_TRANSFORM_LUT)))
+    return false;
+
+  for (size_t index = 0; index < LG_NET_CURSOR_COLOR_MATRIX_FLOATS; ++index)
+    if (!finiteFloat(transform->matrix[index]))
+      return false;
+  return !(transform->flags & LG_NET_CURSOR_COLOR_TRANSFORM_LUT) ||
+    cursorColorLUTValid(transform->lut);
+}
+
+bool lgNetCursorColorTransformEncode(void * data, size_t size,
+    const LGNetCursorColorTransform * transform)
+{
+  const size_t wireSize = lgNetCursorColorTransformSize(transform);
+  if (!data || !wireSize || size < wireSize ||
+      !lgNetCursorColorTransformValid(transform))
+    return false;
+
+  const uint32_t lutLength =
+    (transform->flags & LG_NET_CURSOR_COLOR_TRANSFORM_LUT) ?
+      LG_NET_CURSOR_COLOR_LUT_BYTES : 0;
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  if (!lgNetWriterU64(&writer, transform->updateID)       ||
+      !lgNetWriterU32(&writer, transform->flags)          ||
+      !lgNetWriterU32(&writer, transform->sdrWhiteLevel))
+    return false;
+  for (size_t index = 0; index < LG_NET_CURSOR_COLOR_MATRIX_FLOATS; ++index)
+    if (!writerFloat(&writer, transform->matrix[index]))
+      return false;
+  return
+    writerFloat(&writer, transform->scalar)              &&
+    lgNetWriterU32(&writer, lutLength)                   &&
+    (!lutLength || lgNetWriterBytes(
+      &writer, transform->lut, lutLength))               &&
+    lgNetWriterSize(&writer) == wireSize;
+}
+
+LGNetParseResult lgNetCursorColorTransformDecode(
+    LGNetCursorColorTransform * transform, const void * data, size_t size)
+{
+  if (!transform || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CURSOR_COLOR_TRANSFORM_HEADER_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetCursorColorTransform decoded;
+  LGNetReader               reader;
+  uint32_t                  lutLength;
+  size_t                    expected;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.updateID)       ||
+      !lgNetReaderU32(&reader, &decoded.flags)          ||
+      !lgNetReaderU32(&reader, &decoded.sdrWhiteLevel))
+    return LG_NET_PARSE_INVALID_VALUE;
+  for (size_t index = 0; index < LG_NET_CURSOR_COLOR_MATRIX_FLOATS; ++index)
+    if (!readerFloat(&reader, &decoded.matrix[index]))
+      return LG_NET_PARSE_INVALID_VALUE;
+  if (!readerFloat(&reader, &decoded.scalar) ||
+      !lgNetReaderU32(&reader, &lutLength))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const uint32_t requiredLength =
+    (decoded.flags & LG_NET_CURSOR_COLOR_TRANSFORM_LUT) ?
+      LG_NET_CURSOR_COLOR_LUT_BYTES : 0;
+  if (lutLength != requiredLength)
+    return LG_NET_PARSE_INVALID_VALUE;
+  LGNetParseResult result = variableDecodeSize(
+    LG_NET_CURSOR_COLOR_TRANSFORM_HEADER_WIRE_SIZE, lutLength,
+    LG_NET_CURSOR_COLOR_LUT_BYTES, size, &expected);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (lutLength && !lgNetReaderView(&reader, &decoded.lut, lutLength))
+    return LG_NET_PARSE_INVALID_VALUE;
+  result = fixedDecodeResult(&reader, expected, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetCursorColorTransformValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *transform = decoded;
+  return LG_NET_PARSE_OK;
+}
+
 static bool cursorStatusKnown(LGNetCursorStatusCode status)
 {
   return status >= LG_NET_CURSOR_STATUS_APPLIED &&
@@ -1803,6 +1997,233 @@ LGNetParseResult lgNetCursorStatusDecode(
   if (result != LG_NET_PARSE_OK)
     return result;
   if (!lgNetCursorStatusValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *status = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+bool lgNetControlCursorPositionValid(
+    const LGNetControlCursorPosition * position)
+{
+  return position && position->controlID;
+}
+
+bool lgNetControlCursorPositionEncode(void * data, size_t size,
+    const LGNetControlCursorPosition * position)
+{
+  if (!data || size < LG_NET_CONTROL_CURSOR_POSITION_WIRE_SIZE ||
+      !lgNetControlCursorPositionValid(position))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, position->controlID) &&
+    lgNetWriterI32(&writer, position->x)         &&
+    lgNetWriterI32(&writer, position->y)         &&
+    lgNetWriterSize(&writer) == LG_NET_CONTROL_CURSOR_POSITION_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetControlCursorPositionDecode(
+    LGNetControlCursorPosition * position, const void * data, size_t size)
+{
+  if (!position || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CONTROL_CURSOR_POSITION_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetControlCursorPosition decoded;
+  LGNetReader                reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.controlID) ||
+      !lgNetReaderI32(&reader, &decoded.x)         ||
+      !lgNetReaderI32(&reader, &decoded.y))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_CONTROL_CURSOR_POSITION_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetControlCursorPositionValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *position = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+bool lgNetControlDisplaySizeValid(const LGNetControlDisplaySize * display)
+{
+  return display && display->controlID && display->width && display->height &&
+    display->width  <= LG_NET_CURSOR_MAX_DESKTOP_WIDTH &&
+    display->height <= LG_NET_CURSOR_MAX_DESKTOP_HEIGHT;
+}
+
+bool lgNetControlDisplaySizeEncode(void * data, size_t size,
+    const LGNetControlDisplaySize * display)
+{
+  if (!data || size < LG_NET_CONTROL_DISPLAY_SIZE_WIRE_SIZE ||
+      !lgNetControlDisplaySizeValid(display))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, display->controlID) &&
+    lgNetWriterU32(&writer, display->width)     &&
+    lgNetWriterU32(&writer, display->height)    &&
+    lgNetWriterSize(&writer) == LG_NET_CONTROL_DISPLAY_SIZE_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetControlDisplaySizeDecode(
+    LGNetControlDisplaySize * display, const void * data, size_t size)
+{
+  if (!display || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CONTROL_DISPLAY_SIZE_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetControlDisplaySize decoded;
+  LGNetReader             reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.controlID) ||
+      !lgNetReaderU32(&reader, &decoded.width)     ||
+      !lgNetReaderU32(&reader, &decoded.height))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_CONTROL_DISPLAY_SIZE_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetControlDisplaySizeValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *display = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+bool lgNetControlFrameScheduleValid(
+    const LGNetControlFrameSchedule * schedule)
+{
+  if (!schedule || !schedule->controlID || !schedule->flags ||
+      (schedule->flags & ~CONTROL_FRAME_SCHEDULE_FLAGS) ||
+      schedule->leaseMs > LG_NET_CONTROL_MAX_LEASE_MS)
+    return false;
+
+  if (schedule->flags & LG_NET_CONTROL_FRAME_SCHEDULE_ACTIVE)
+    return schedule->generation && schedule->periodNs && schedule->leaseMs;
+  return !(schedule->flags & LG_NET_CONTROL_FRAME_SCHEDULE_IMMEDIATE);
+}
+
+bool lgNetControlFrameScheduleEncode(void * data, size_t size,
+    const LGNetControlFrameSchedule * schedule)
+{
+  if (!data || size < LG_NET_CONTROL_FRAME_SCHEDULE_WIRE_SIZE ||
+      !lgNetControlFrameScheduleValid(schedule))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, schedule->controlID)              &&
+    lgNetWriterU32(&writer, schedule->generation)             &&
+    lgNetWriterU32(&writer, schedule->flags)                  &&
+    lgNetWriterU64(&writer, schedule->periodNs)               &&
+    lgNetWriterU64(&writer, schedule->targetSlackNs)          &&
+    lgNetWriterI64(&writer, schedule->phaseErrorNs)           &&
+    lgNetWriterU32(&writer, schedule->feedbackFrameSerial)    &&
+    lgNetWriterU32(&writer, schedule->feedbackScheduleEpoch)  &&
+    lgNetWriterU32(&writer, schedule->feedbackDeadlineSerial) &&
+    lgNetWriterU32(&writer, schedule->leaseMs)                &&
+    lgNetWriterSize(&writer) == LG_NET_CONTROL_FRAME_SCHEDULE_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetControlFrameScheduleDecode(
+    LGNetControlFrameSchedule * schedule, const void * data, size_t size)
+{
+  if (!schedule || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CONTROL_FRAME_SCHEDULE_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetControlFrameSchedule decoded;
+  LGNetReader               reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.controlID)              ||
+      !lgNetReaderU32(&reader, &decoded.generation)             ||
+      !lgNetReaderU32(&reader, &decoded.flags)                  ||
+      !lgNetReaderU64(&reader, &decoded.periodNs)               ||
+      !lgNetReaderU64(&reader, &decoded.targetSlackNs)          ||
+      !lgNetReaderI64(&reader, &decoded.phaseErrorNs)           ||
+      !lgNetReaderU32(&reader, &decoded.feedbackFrameSerial)    ||
+      !lgNetReaderU32(&reader, &decoded.feedbackScheduleEpoch)  ||
+      !lgNetReaderU32(&reader, &decoded.feedbackDeadlineSerial) ||
+      !lgNetReaderU32(&reader, &decoded.leaseMs))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_CONTROL_FRAME_SCHEDULE_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetControlFrameScheduleValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *schedule = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+static bool controlStatusKnown(LGNetControlStatusCode status)
+{
+  return status >= LG_NET_CONTROL_STATUS_APPLIED &&
+    status <= LG_NET_CONTROL_STATUS_ERROR;
+}
+
+bool lgNetControlStatusValid(const LGNetControlStatus * status)
+{
+  return status && status->controlID && controlStatusKnown(status->status);
+}
+
+bool lgNetControlStatusEncode(
+    void * data, size_t size, const LGNetControlStatus * status)
+{
+  if (!data || size < LG_NET_CONTROL_STATUS_WIRE_SIZE ||
+      !lgNetControlStatusValid(status))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64(&writer, status->controlID) &&
+    lgNetWriterU32(&writer, status->status)    &&
+    lgNetWriterU32(&writer, status->detail)    &&
+    lgNetWriterSize(&writer) == LG_NET_CONTROL_STATUS_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetControlStatusDecode(
+    LGNetControlStatus * status, const void * data, size_t size)
+{
+  if (!status || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CONTROL_STATUS_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetControlStatus decoded;
+  LGNetReader        reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64(&reader, &decoded.controlID) ||
+      !lgNetReaderU32(&reader, &decoded.status)    ||
+      !lgNetReaderU32(&reader, &decoded.detail))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_CONTROL_STATUS_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetControlStatusValid(&decoded))
     return LG_NET_PARSE_INVALID_VALUE;
 
   *status = decoded;

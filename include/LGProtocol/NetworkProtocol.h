@@ -63,7 +63,7 @@ extern "C" {
 #define LG_NET_VIDEO_VERSION_CURRENT      2U
 #define LG_NET_VIDEO_VERSION_MIN          2U
 #define LG_NET_VIDEO_VERSION_MAX          LG_NET_VIDEO_VERSION_CURRENT
-#define LG_NET_CURSOR_VERSION_CURRENT     1U
+#define LG_NET_CURSOR_VERSION_CURRENT     2U
 #define LG_NET_CURSOR_VERSION_MIN         1U
 #define LG_NET_CURSOR_VERSION_MAX         LG_NET_CURSOR_VERSION_CURRENT
 #define LG_NET_INPUT_VERSION_CURRENT      1U
@@ -80,6 +80,9 @@ extern "C" {
 #define LG_NET_FILE_VERSION_MAX           LG_NET_FILE_VERSION_CURRENT
 /* Reserved now so a future USB implementation cannot collide with a service. */
 #define LG_NET_USB_VERSION_RESERVED       1U
+#define LG_NET_CONTROL_VERSION_CURRENT    1U
+#define LG_NET_CONTROL_VERSION_MIN        1U
+#define LG_NET_CONTROL_VERSION_MAX        LG_NET_CONTROL_VERSION_CURRENT
 
 typedef uint16_t LGNetService;
 
@@ -94,6 +97,7 @@ enum
   LG_NET_SERVICE_CLIPBOARD = 7,
   LG_NET_SERVICE_FILE      = 8,
   LG_NET_SERVICE_USB       = 9,
+  LG_NET_SERVICE_CONTROL   = 10,
 };
 
 typedef uint16_t LGNetCoreMessage;
@@ -144,11 +148,12 @@ typedef uint16_t LGNetCursorMessage;
 
 enum
 {
-  LG_NET_CURSOR_MESSAGE_STATE     = 1,
-  LG_NET_CURSOR_MESSAGE_POSITION  = 2,
-  LG_NET_CURSOR_MESSAGE_SHAPE     = 3,
-  LG_NET_CURSOR_MESSAGE_TRANSFORM = 4,
-  LG_NET_CURSOR_MESSAGE_STATUS    = 5,
+  LG_NET_CURSOR_MESSAGE_STATE           = 1,
+  LG_NET_CURSOR_MESSAGE_POSITION        = 2,
+  LG_NET_CURSOR_MESSAGE_SHAPE           = 3,
+  LG_NET_CURSOR_MESSAGE_TRANSFORM       = 4,
+  LG_NET_CURSOR_MESSAGE_STATUS          = 5,
+  LG_NET_CURSOR_MESSAGE_COLOR_TRANSFORM = 6,
 };
 
 typedef uint16_t LGNetInputMessage;
@@ -241,6 +246,16 @@ enum
   LG_NET_USB_MESSAGE_CANCEL       = 6,
   LG_NET_USB_MESSAGE_RESET        = 7,
   LG_NET_USB_MESSAGE_STATUS       = 8,
+};
+
+typedef uint16_t LGNetControlMessage;
+
+enum
+{
+  LG_NET_CONTROL_MESSAGE_CURSOR_POSITION = 1,
+  LG_NET_CONTROL_MESSAGE_DISPLAY_SIZE    = 2,
+  LG_NET_CONTROL_MESSAGE_FRAME_SCHEDULE  = 3,
+  LG_NET_CONTROL_MESSAGE_STATUS          = 4,
 };
 
 typedef uint32_t LGNetEnvelopeFlags;
