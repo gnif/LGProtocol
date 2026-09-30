@@ -19,7 +19,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-project(LGProtocol VERSION 1.1.0 LANGUAGES C CXX)
+project(LGProtocol VERSION 1.2.0 LANGUAGES C CXX)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -27,14 +27,44 @@ include(GNUInstallDirs)
 add_library(LGProtocol INTERFACE)
 add_library(LGProtocol::LGProtocol ALIAS LGProtocol)
 
+add_library(LGProtocolNetwork STATIC
+  src/network/protocol.c
+  src/network/services.c
+  src/network/wire.c
+)
+add_library(LGProtocol::Network ALIAS LGProtocolNetwork)
+
 target_compile_features(LGProtocol INTERFACE c_std_11 cxx_std_11)
 target_include_directories(LGProtocol INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-install(TARGETS LGProtocol
+target_compile_features(LGProtocolNetwork PUBLIC c_std_11)
+target_link_libraries(LGProtocolNetwork PUBLIC LGProtocol::LGProtocol)
+set_target_properties(LGProtocolNetwork PROPERTIES
+  EXPORT_NAME               Network
+  OUTPUT_NAME               LGProtocolNetwork
+  POSITION_INDEPENDENT_CODE ON
+)
+
+if(MSVC OR CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+  target_compile_options(LGProtocolNetwork PRIVATE /W4 /WX)
+elseif(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(LGProtocolNetwork PRIVATE
+    -Wall
+    -Wextra
+    -Werror
+  )
+endif()
+
+install(TARGETS
+  LGProtocol
+  LGProtocolNetwork
   EXPORT LGProtocolTargets
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 install(FILES
   include/LGProtocol/KVMFR.h

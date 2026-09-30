@@ -1,8 +1,8 @@
 # LGProtocol
 
-LGProtocol is a standalone, header-only distribution of the Looking Glass
-wire protocol declarations. Its install surface contains portable KVMFR and
-network transport protocol headers.
+LGProtocol is a standalone distribution of the Looking Glass wire protocol.
+Its install surface contains portable KVMFR and network transport protocol
+headers, plus reusable network serialization and validation codecs.
 
 Consumers include protocol declarations from the exported include root, for
 example:
@@ -12,12 +12,22 @@ example:
 #include <LGProtocol/NetworkServices.h>
 ```
 
-CMake packages expose the `LGProtocol::LGProtocol` interface target. The target
-requires C11 or C++11 and adds only the installed include root:
+CMake packages expose the header-only `LGProtocol::LGProtocol` interface target.
+The target requires C11 or C++11 and adds only the installed include root:
 
 ```cmake
 find_package(LGProtocol REQUIRED)
 target_link_libraries(my_target PRIVATE LGProtocol::LGProtocol)
+```
+
+Consumers that call the network codec functions link the static
+`LGProtocol::Network` target instead. It supplies the stream readers and
+writers, packet framing, serialization, parsing, and protocol validation while
+also providing the public headers transitively:
+
+```cmake
+find_package(LGProtocol REQUIRED)
+target_link_libraries(my_target PRIVATE LGProtocol::Network)
 ```
 
 Configure and run the native validation suite with:
