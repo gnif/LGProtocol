@@ -186,9 +186,28 @@ static const LGNetAudioDirectionMask AUDIO_DIRECTIONS =
   LG_NET_AUDIO_DIRECTIONS_PLAYBACK |
   LG_NET_AUDIO_DIRECTIONS_CAPTURE;
 
-static const LGNetAudioSubscribeFlags AUDIO_SUBSCRIBE_FLAGS =
+static const LGNetAudioSubscribeFlags AUDIO_SUBSCRIBE_FLAGS_V1 =
   LG_NET_AUDIO_SUBSCRIBE_LOW_LATENCY |
   LG_NET_AUDIO_SUBSCRIBE_EXCLUSIVE;
+
+static const LGNetAudioSubscribeFlags AUDIO_SUBSCRIBE_FLAGS =
+  LG_NET_AUDIO_SUBSCRIBE_LOW_LATENCY       |
+  LG_NET_AUDIO_SUBSCRIBE_EXCLUSIVE_CAPTURE |
+  LG_NET_AUDIO_SUBSCRIBE_CLOCK_FEEDBACK    |
+  LG_NET_AUDIO_SUBSCRIBE_DATAGRAM_PCM      |
+  LG_NET_AUDIO_SUBSCRIBE_RELIABLE_PCM;
+
+static const LGNetAudioRoles AUDIO_ROLES =
+  LG_NET_AUDIO_ROLE_PLAYBACK          |
+  LG_NET_AUDIO_ROLE_CAPTURE           |
+  LG_NET_AUDIO_ROLE_CLOCK_FEEDBACK    |
+  LG_NET_AUDIO_ROLE_DATAGRAM_PCM      |
+  LG_NET_AUDIO_ROLE_RELIABLE_PCM      |
+  LG_NET_AUDIO_ROLE_EXCLUSIVE_CAPTURE;
+
+static const LGNetAudioClockFlags AUDIO_CLOCK_FLAGS =
+  LG_NET_AUDIO_CLOCK_VALID |
+  LG_NET_AUDIO_CLOCK_STABLE;
 
 static const LGNetAudioControlFlags AUDIO_CONTROL_FLAGS =
   LG_NET_AUDIO_CONTROL_GRACEFUL |
@@ -2661,6 +2680,19 @@ static bool audioDirectionKnown(LGNetAudioDirection direction)
     direction == LG_NET_AUDIO_DIRECTION_CAPTURE;
 }
 
+static bool audioRolesValid(LGNetAudioRoles roles)
+{
+  const LGNetAudioRoles directions =
+    roles & (LG_NET_AUDIO_ROLE_PLAYBACK | LG_NET_AUDIO_ROLE_CAPTURE);
+  const LGNetAudioRoles delivery   =
+    roles & (LG_NET_AUDIO_ROLE_DATAGRAM_PCM |
+      LG_NET_AUDIO_ROLE_RELIABLE_PCM);
+
+  return roles && !(roles & ~AUDIO_ROLES) && directions && delivery &&
+    (!(roles & LG_NET_AUDIO_ROLE_EXCLUSIVE_CAPTURE) ||
+      (roles & LG_NET_AUDIO_ROLE_CAPTURE));
+}
+
 bool lgNetAudioSubscribeValid(const LGNetAudioSubscribe * subscribe)
 {
   return subscribe && subscribe->subscriberID && subscribe->directions &&
@@ -2668,6 +2700,45 @@ bool lgNetAudioSubscribeValid(const LGNetAudioSubscribe * subscribe)
     subscribe->targetLatencyUs && subscribe->maxPacketFrames &&
     subscribe->maxPacketFrames <= LG_NET_AUDIO_MAX_PACKET_FRAMES &&
     !(subscribe->flags & ~AUDIO_SUBSCRIBE_FLAGS);
+}
+
+LGNetAudioRoles lgNetAudioSubscribeRoles(
+    const LGNetAudioSubscribe * subscribe)
+{
+  if (!subscribe)
+    return 0;
+
+  LGNetAudioRoles roles = 0;
+  if (subscribe->directions & LG_NET_AUDIO_DIRECTIONS_PLAYBACK)
+    roles |= LG_NET_AUDIO_ROLE_PLAYBACK;
+  if (subscribe->directions & LG_NET_AUDIO_DIRECTIONS_CAPTURE)
+    roles |= LG_NET_AUDIO_ROLE_CAPTURE;
+  if (subscribe->flags & LG_NET_AUDIO_SUBSCRIBE_CLOCK_FEEDBACK)
+    roles |= LG_NET_AUDIO_ROLE_CLOCK_FEEDBACK;
+  if (subscribe->flags & LG_NET_AUDIO_SUBSCRIBE_DATAGRAM_PCM)
+    roles |= LG_NET_AUDIO_ROLE_DATAGRAM_PCM;
+  if (subscribe->flags & LG_NET_AUDIO_SUBSCRIBE_RELIABLE_PCM)
+    roles |= LG_NET_AUDIO_ROLE_RELIABLE_PCM;
+  if (subscribe->flags & LG_NET_AUDIO_SUBSCRIBE_EXCLUSIVE_CAPTURE)
+    roles |= LG_NET_AUDIO_ROLE_EXCLUSIVE_CAPTURE;
+
+  return roles;
+}
+
+bool lgNetAudioSubscribeValidForVersion(
+    const LGNetAudioSubscribe * subscribe, uint16_t serviceVersion)
+{
+  if (!lgNetAudioSubscribeValid(subscribe))
+    return false;
+
+  if (serviceVersion == LG_NET_AUDIO_VERSION_INITIAL)
+    return !(subscribe->flags & ~AUDIO_SUBSCRIBE_FLAGS_V1);
+
+  if (serviceVersion ==
+      LG_NET_AUDIO_OWNERSHIP_INTRODUCED_SERVICE_VERSION)
+    return audioRolesValid(lgNetAudioSubscribeRoles(subscribe));
+
+  return false;
 }
 
 bool lgNetAudioSubscribeEncode(
@@ -2686,6 +2757,13 @@ bool lgNetAudioSubscribeEncode(
     lgNetWriterU32(&writer, subscribe->maxPacketFrames) &&
     lgNetWriterU32(&writer, subscribe->flags)           &&
     lgNetWriterSize(&writer) == LG_NET_AUDIO_SUBSCRIBE_WIRE_SIZE;
+}
+
+bool lgNetAudioSubscribeEncodeForVersion(void * data, size_t size,
+    const LGNetAudioSubscribe * subscribe, uint16_t serviceVersion)
+{
+  return lgNetAudioSubscribeValidForVersion(subscribe, serviceVersion) &&
+    lgNetAudioSubscribeEncode(data, size, subscribe);
 }
 
 LGNetParseResult lgNetAudioSubscribeDecode(
@@ -2716,6 +2794,119 @@ LGNetParseResult lgNetAudioSubscribeDecode(
 
   *subscribe = decoded;
   return LG_NET_PARSE_OK;
+}
+
+LGNetParseResult lgNetAudioSubscribeDecodeForVersion(
+    LGNetAudioSubscribe * subscribe, uint16_t serviceVersion,
+    const void * data, size_t size)
+{
+  const LGNetParseResult result =
+    lgNetAudioSubscribeDecode(subscribe, data, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetAudioSubscribeValidForVersion(subscribe, serviceVersion))
+    return LG_NET_PARSE_INVALID_VALUE;
+  return LG_NET_PARSE_OK;
+}
+
+static bool audioGrantStatusKnown(LGNetAudioGrantStatus status)
+{
+  return status >= LG_NET_AUDIO_GRANT_GRANTED &&
+    status <= LG_NET_AUDIO_GRANT_UNSUPPORTED;
+}
+
+bool lgNetAudioSubscriptionGrantValid(
+    const LGNetAudioSubscriptionGrant * grant)
+{
+  if (!grant || !grant->subscriberID || !grant->subscriptionEpoch ||
+      !audioGrantStatusKnown(grant->status) ||
+      !audioRolesValid(grant->requestedRoles) ||
+      (grant->grantedRoles & ~grant->requestedRoles))
+    return false;
+
+  if (grant->status == LG_NET_AUDIO_GRANT_GRANTED ||
+      grant->status == LG_NET_AUDIO_GRANT_PARTIAL)
+  {
+    if (!audioRolesValid(grant->grantedRoles) || !grant->targetLatencyUs ||
+        !grant->maxPacketFrames ||
+        grant->maxPacketFrames > LG_NET_AUDIO_MAX_PACKET_FRAMES)
+      return false;
+
+    return grant->status == LG_NET_AUDIO_GRANT_GRANTED ?
+      grant->grantedRoles == grant->requestedRoles :
+      grant->grantedRoles != grant->requestedRoles;
+  }
+
+  return !grant->grantedRoles && !grant->targetLatencyUs &&
+    !grant->maxPacketFrames;
+}
+
+bool lgNetAudioSubscriptionGrantEncode(void * data, size_t size,
+    const LGNetAudioSubscriptionGrant * grant)
+{
+  if (!data || size < LG_NET_AUDIO_SUBSCRIPTION_GRANT_WIRE_SIZE ||
+      !lgNetAudioSubscriptionGrantValid(grant))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU64 (&writer, grant->subscriberID)      &&
+    lgNetWriterU64 (&writer, grant->subscriptionEpoch) &&
+    lgNetWriterU32 (&writer, grant->requestedRoles)    &&
+    lgNetWriterU32 (&writer, grant->grantedRoles)      &&
+    lgNetWriterU32 (&writer, grant->targetLatencyUs)   &&
+    lgNetWriterU32 (&writer, grant->maxPacketFrames)   &&
+    lgNetWriterU16 (&writer, grant->status)            &&
+    lgNetWriterZero(&writer, 2)                        &&
+    lgNetWriterU32 (&writer, grant->detail)            &&
+    lgNetWriterSize(&writer) ==
+      LG_NET_AUDIO_SUBSCRIPTION_GRANT_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetAudioSubscriptionGrantDecode(
+    LGNetAudioSubscriptionGrant * grant, const void * data, size_t size)
+{
+  if (!grant || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_AUDIO_SUBSCRIPTION_GRANT_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetAudioSubscriptionGrant decoded;
+  LGNetReader                 reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU64 (&reader, &decoded.subscriberID)      ||
+      !lgNetReaderU64 (&reader, &decoded.subscriptionEpoch) ||
+      !lgNetReaderU32 (&reader, &decoded.requestedRoles)    ||
+      !lgNetReaderU32 (&reader, &decoded.grantedRoles)      ||
+      !lgNetReaderU32 (&reader, &decoded.targetLatencyUs)   ||
+      !lgNetReaderU32 (&reader, &decoded.maxPacketFrames)   ||
+      !lgNetReaderU16 (&reader, &decoded.status)            ||
+      !lgNetReaderZero(&reader, 2)                          ||
+      !lgNetReaderU32 (&reader, &decoded.detail))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(&reader,
+    LG_NET_AUDIO_SUBSCRIPTION_GRANT_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetAudioSubscriptionGrantValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *grant = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+bool lgNetAudioEnvelopeMatchesSubscription(
+    const LGNetEnvelope * envelope, uint64_t subscriptionEpoch)
+{
+  return envelope && subscriptionEpoch &&
+    envelope->service == LG_NET_SERVICE_AUDIO &&
+    envelope->serviceVersion >=
+      LG_NET_AUDIO_OWNERSHIP_INTRODUCED_SERVICE_VERSION &&
+    envelope->messageType != LG_NET_AUDIO_MESSAGE_SUBSCRIBE &&
+    envelope->componentEpoch == subscriptionEpoch;
 }
 
 static bool audioSampleFormatKnown(LGNetAudioSampleFormat format)
@@ -3053,6 +3244,83 @@ LGNetParseResult lgNetAudioClockFeedbackDecode(
     return LG_NET_PARSE_INVALID_VALUE;
 
   *feedback = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+bool lgNetAudioClockStateValid(const LGNetAudioClockState * state)
+{
+  if (!state || !state->streamID ||
+      !audioDirectionKnown(state->direction) ||
+      (state->flags & ~AUDIO_CLOCK_FLAGS) || !state->formatEpoch ||
+      !state->subscriptionEpoch || !state->packetID ||
+      state->rateQ32 > LG_NET_AUDIO_MAX_RATE_Q32 ||
+      state->targetRateQ32 > LG_NET_AUDIO_MAX_RATE_Q32 ||
+      ((state->flags & LG_NET_AUDIO_CLOCK_STABLE) &&
+        !(state->flags & LG_NET_AUDIO_CLOCK_VALID)))
+    return false;
+
+  return (state->flags & LG_NET_AUDIO_CLOCK_VALID) || !state->timeNs;
+}
+
+bool lgNetAudioClockStateEncode(
+    void * data, size_t size, const LGNetAudioClockState * state)
+{
+  if (!data || size < LG_NET_AUDIO_CLOCK_STATE_WIRE_SIZE ||
+      !lgNetAudioClockStateValid(state))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU32(&writer, state->streamID)          &&
+    lgNetWriterU16(&writer, state->direction)         &&
+    lgNetWriterU16(&writer, state->flags)             &&
+    lgNetWriterU64(&writer, state->formatEpoch)       &&
+    lgNetWriterU64(&writer, state->subscriptionEpoch) &&
+    lgNetWriterU64(&writer, state->packetID)          &&
+    lgNetWriterU64(&writer, state->framePosition)     &&
+    lgNetWriterI64(&writer, state->timeNs)            &&
+    lgNetWriterU64(&writer, state->rateQ32)           &&
+    lgNetWriterU64(&writer, state->targetRateQ32)     &&
+    lgNetWriterI32(&writer, state->queuedFrames)      &&
+    lgNetWriterI32(&writer, state->driftPpm)          &&
+    lgNetWriterSize(&writer) == LG_NET_AUDIO_CLOCK_STATE_WIRE_SIZE;
+}
+
+LGNetParseResult lgNetAudioClockStateDecode(
+    LGNetAudioClockState * state, const void * data, size_t size)
+{
+  if (!state || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_AUDIO_CLOCK_STATE_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetAudioClockState decoded;
+  LGNetReader          reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU32(&reader, &decoded.streamID)          ||
+      !lgNetReaderU16(&reader, &decoded.direction)         ||
+      !lgNetReaderU16(&reader, &decoded.flags)             ||
+      !lgNetReaderU64(&reader, &decoded.formatEpoch)       ||
+      !lgNetReaderU64(&reader, &decoded.subscriptionEpoch) ||
+      !lgNetReaderU64(&reader, &decoded.packetID)          ||
+      !lgNetReaderU64(&reader, &decoded.framePosition)     ||
+      !lgNetReaderI64(&reader, &decoded.timeNs)            ||
+      !lgNetReaderU64(&reader, &decoded.rateQ32)           ||
+      !lgNetReaderU64(&reader, &decoded.targetRateQ32)     ||
+      !lgNetReaderI32(&reader, &decoded.queuedFrames)      ||
+      !lgNetReaderI32(&reader, &decoded.driftPpm))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const LGNetParseResult result = fixedDecodeResult(
+    &reader, LG_NET_AUDIO_CLOCK_STATE_WIRE_SIZE, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetAudioClockStateValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *state = decoded;
   return LG_NET_PARSE_OK;
 }
 

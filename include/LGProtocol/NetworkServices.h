@@ -44,6 +44,9 @@ extern "C" {
   2U
 #define LG_NET_INPUT_LEDS_INTRODUCED_SERVICE_VERSION      1U
 #define LG_NET_AUDIO_PCM_INTRODUCED_SERVICE_VERSION       1U
+#define LG_NET_AUDIO_OWNERSHIP_INTRODUCED_SERVICE_VERSION 2U
+#define LG_NET_AUDIO_CLOCK_STATE_INTRODUCED_SERVICE_VERSION \
+  2U
 #define LG_NET_CLIPBOARD_CHUNK_INTRODUCED_SERVICE_VERSION 1U
 #define LG_NET_FILE_CHUNK_INTRODUCED_SERVICE_VERSION      1U
 #define LG_NET_USB_RESERVED_INTRODUCED_SERVICE_VERSION    1U
@@ -105,6 +108,10 @@ extern "C" {
 #define LG_NET_AUDIO_DATA_HEADER_WIRE_SIZE        48U
 #define LG_NET_AUDIO_STATE_WIRE_SIZE              32U
 #define LG_NET_AUDIO_CLOCK_FEEDBACK_WIRE_SIZE     48U
+#define LG_NET_AUDIO_SUBSCRIPTION_GRANT_WIRE_SIZE 40U
+#define LG_NET_AUDIO_CLOCK_STATE_WIRE_SIZE        72U
+#define LG_NET_AUDIO_MAX_RATE_Q32                 \
+  (UINT64_C(768000) << 32)
 
 #define LG_NET_CLIPBOARD_MAX_MIME_LENGTH          255U
 #define LG_NET_CLIPBOARD_MAX_FORMATS              256U
@@ -1089,11 +1096,18 @@ typedef uint32_t LGNetAudioSubscribeFlags;
 
 enum
 {
-  LG_NET_AUDIO_SUBSCRIBE_LOW_LATENCY = 1U << 0,
-  LG_NET_AUDIO_SUBSCRIBE_EXCLUSIVE   = 1U << 1,
+  LG_NET_AUDIO_SUBSCRIBE_LOW_LATENCY       = 1U << 0,
+  LG_NET_AUDIO_SUBSCRIBE_EXCLUSIVE         = 1U << 1,
+  LG_NET_AUDIO_SUBSCRIBE_EXCLUSIVE_CAPTURE =
+    LG_NET_AUDIO_SUBSCRIBE_EXCLUSIVE,
+  LG_NET_AUDIO_SUBSCRIBE_CLOCK_FEEDBACK    = 1U << 2,
+  LG_NET_AUDIO_SUBSCRIBE_DATAGRAM_PCM      = 1U << 3,
+  LG_NET_AUDIO_SUBSCRIBE_RELIABLE_PCM      = 1U << 4,
 };
 
-/* LG_NET_AUDIO_MESSAGE_SUBSCRIBE. */
+/* LG_NET_AUDIO_MESSAGE_SUBSCRIBE. Service version 1 uses only LOW_LATENCY
+ * and EXCLUSIVE. Version 2 makes PCM delivery and clock authority explicit;
+ * EXCLUSIVE is retained as the version 1 spelling of EXCLUSIVE_CAPTURE. */
 typedef struct LGNetAudioSubscribe
 {
   uint64_t                 subscriberID;
@@ -1103,6 +1117,48 @@ typedef struct LGNetAudioSubscribe
   LGNetAudioSubscribeFlags flags;
 }
 LGNetAudioSubscribe;
+
+typedef uint32_t LGNetAudioRoles;
+
+enum
+{
+  LG_NET_AUDIO_ROLE_PLAYBACK          = 1U << 0,
+  LG_NET_AUDIO_ROLE_CAPTURE           = 1U << 1,
+  LG_NET_AUDIO_ROLE_CLOCK_FEEDBACK    = 1U << 2,
+  LG_NET_AUDIO_ROLE_DATAGRAM_PCM      = 1U << 3,
+  LG_NET_AUDIO_ROLE_RELIABLE_PCM      = 1U << 4,
+  LG_NET_AUDIO_ROLE_EXCLUSIVE_CAPTURE = 1U << 5,
+};
+
+typedef uint16_t LGNetAudioGrantStatus;
+
+enum
+{
+  LG_NET_AUDIO_GRANT_GRANTED     = 1,
+  LG_NET_AUDIO_GRANT_PARTIAL     = 2,
+  LG_NET_AUDIO_GRANT_DENIED      = 3,
+  LG_NET_AUDIO_GRANT_BUSY        = 4,
+  LG_NET_AUDIO_GRANT_UNSUPPORTED = 5,
+};
+
+/* LG_NET_AUDIO_MESSAGE_SUBSCRIPTION_GRANT. A server allocates a fresh,
+ * nonzero subscriptionEpoch whenever capture ownership, feedback authority,
+ * or any granted role changes. Every version 2 audio envelope other than a
+ * SUBSCRIBE request carries the granted epoch in componentEpoch. Receivers
+ * must discard a packet whose componentEpoch does not match the active grant
+ * before interpreting its payload. */
+typedef struct LGNetAudioSubscriptionGrant
+{
+  uint64_t              subscriberID;
+  uint64_t              subscriptionEpoch;
+  LGNetAudioRoles       requestedRoles;
+  LGNetAudioRoles       grantedRoles;
+  uint32_t              targetLatencyUs;
+  uint32_t              maxPacketFrames;
+  LGNetAudioGrantStatus status;
+  uint32_t              detail;
+}
+LGNetAudioSubscriptionGrant;
 
 typedef uint16_t LGNetAudioSampleFormat;
 
@@ -1190,6 +1246,9 @@ typedef struct LGNetAudioState
 }
 LGNetAudioState;
 
+/* Legacy service version 1 clock feedback. Version 2 peers use
+ * LG_NET_AUDIO_MESSAGE_CLOCK_STATE so this established codec remains wire
+ * compatible with version 1. */
 typedef struct LGNetAudioClockFeedback
 {
   uint32_t            streamID;
@@ -1202,6 +1261,36 @@ typedef struct LGNetAudioClockFeedback
   int32_t             driftPpm;
 }
 LGNetAudioClockFeedback;
+
+typedef uint16_t LGNetAudioClockFlags;
+
+enum
+{
+  LG_NET_AUDIO_CLOCK_VALID  = 1U << 0,
+  LG_NET_AUDIO_CLOCK_STABLE = 1U << 1,
+};
+
+/* LG_NET_AUDIO_MESSAGE_CLOCK_STATE. timeNs is a signed monotonic timestamp
+ * in the publisher's clock domain. Without CLOCK_VALID, timeNs must be zero;
+ * CLOCK_STABLE requires CLOCK_VALID. Rates are unsigned 32.32 frames per
+ * second, zero rateQ32 means unavailable, and zero targetRateQ32 means no
+ * rate adjustment is requested. */
+typedef struct LGNetAudioClockState
+{
+  uint32_t             streamID;
+  LGNetAudioDirection  direction;
+  LGNetAudioClockFlags flags;
+  uint64_t             formatEpoch;
+  uint64_t             subscriptionEpoch;
+  uint64_t             packetID;
+  uint64_t             framePosition;
+  int64_t              timeNs;
+  uint64_t             rateQ32;
+  uint64_t             targetRateQ32;
+  int32_t              queuedFrames;
+  int32_t              driftPpm;
+}
+LGNetAudioClockState;
 
 typedef uint16_t LGNetAudioControlFlags;
 
@@ -1785,10 +1874,28 @@ LGNetParseResult lgNetInputLEDsDecode(
   LGNetInputLEDs * leds, const void * data, size_t size);
 
 bool lgNetAudioSubscribeValid(const LGNetAudioSubscribe * subscribe);
+bool lgNetAudioSubscribeValidForVersion(
+  const LGNetAudioSubscribe * subscribe, uint16_t serviceVersion);
+LGNetAudioRoles lgNetAudioSubscribeRoles(
+  const LGNetAudioSubscribe * subscribe);
 bool lgNetAudioSubscribeEncode(
   void * data, size_t size, const LGNetAudioSubscribe * subscribe);
+bool lgNetAudioSubscribeEncodeForVersion(void * data, size_t size,
+  const LGNetAudioSubscribe * subscribe, uint16_t serviceVersion);
 LGNetParseResult lgNetAudioSubscribeDecode(
   LGNetAudioSubscribe * subscribe, const void * data, size_t size);
+LGNetParseResult lgNetAudioSubscribeDecodeForVersion(
+  LGNetAudioSubscribe * subscribe, uint16_t serviceVersion,
+  const void * data, size_t size);
+
+bool lgNetAudioSubscriptionGrantValid(
+  const LGNetAudioSubscriptionGrant * grant);
+bool lgNetAudioSubscriptionGrantEncode(void * data, size_t size,
+  const LGNetAudioSubscriptionGrant * grant);
+LGNetParseResult lgNetAudioSubscriptionGrantDecode(
+  LGNetAudioSubscriptionGrant * grant, const void * data, size_t size);
+bool lgNetAudioEnvelopeMatchesSubscription(
+  const LGNetEnvelope * envelope, uint64_t subscriptionEpoch);
 
 bool lgNetAudioFormatValid(const LGNetAudioFormat * format);
 bool lgNetAudioFormatEncode(
@@ -1817,6 +1924,12 @@ bool lgNetAudioClockFeedbackEncode(void * data, size_t size,
   const LGNetAudioClockFeedback * feedback);
 LGNetParseResult lgNetAudioClockFeedbackDecode(
   LGNetAudioClockFeedback * feedback, const void * data, size_t size);
+
+bool lgNetAudioClockStateValid(const LGNetAudioClockState * state);
+bool lgNetAudioClockStateEncode(
+  void * data, size_t size, const LGNetAudioClockState * state);
+LGNetParseResult lgNetAudioClockStateDecode(
+  LGNetAudioClockState * state, const void * data, size_t size);
 
 bool lgNetAudioControlValid(const LGNetAudioControl * control);
 bool lgNetAudioControlEncode(
