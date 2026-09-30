@@ -28,8 +28,14 @@ add_library(LGProtocol INTERFACE)
 add_library(LGProtocol::LGProtocol ALIAS LGProtocol)
 
 add_library(LGProtocolNetwork STATIC
+  src/network/crc32c.c
+  src/network/packet.c
   src/network/protocol.c
+  src/network/reassembly.c
+  src/network/route.c
+  src/network/sequence.c
   src/network/services.c
+  src/network/stream.c
   src/network/wire.c
 )
 add_library(LGProtocol::Network ALIAS LGProtocolNetwork)
@@ -75,9 +81,15 @@ install(FILES
   include/LGProtocol/KVMFRStream.h
   include/LGProtocol/KVMFRTypes.h
   include/LGProtocol/LGMPConfig.h
+  include/LGProtocol/NetworkCRC32C.h
   include/LGProtocol/NetworkIdentity.h
+  include/LGProtocol/NetworkPacket.h
   include/LGProtocol/NetworkProtocol.h
+  include/LGProtocol/NetworkReassembly.h
+  include/LGProtocol/NetworkRoute.h
+  include/LGProtocol/NetworkSequence.h
   include/LGProtocol/NetworkServices.h
+  include/LGProtocol/NetworkStream.h
   include/LGProtocol/NetworkWire.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/LGProtocol
 )
