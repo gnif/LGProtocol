@@ -28,6 +28,7 @@ add_library(LGProtocol INTERFACE)
 add_library(LGProtocol::LGProtocol ALIAS LGProtocol)
 
 add_library(LGProtocolNetwork STATIC
+  src/network/auth.c
   src/network/crc32c.c
   src/network/packet.c
   src/network/protocol.c
@@ -81,6 +82,7 @@ install(FILES
   include/LGProtocol/KVMFRStream.h
   include/LGProtocol/KVMFRTypes.h
   include/LGProtocol/LGMPConfig.h
+  include/LGProtocol/NetworkAuth.h
   include/LGProtocol/NetworkCRC32C.h
   include/LGProtocol/NetworkIdentity.h
   include/LGProtocol/NetworkPacket.h
