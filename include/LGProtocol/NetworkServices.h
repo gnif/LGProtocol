@@ -500,6 +500,7 @@ typedef struct LGNetVideoStreamConfig
   uint64_t                    configEpoch;
   uint32_t                    width;
   uint32_t                    height;
+  /* Both fields are zero when the source cadence is unknown or variable. */
   uint32_t                    refreshNumerator;
   uint32_t                    refreshDenominator;
   LGNetVideoPixelFormat       pixelFormat;

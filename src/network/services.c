@@ -962,7 +962,8 @@ bool lgNetVideoStreamConfigValid(const LGNetVideoStreamConfig * config)
     config->configEpoch && config->width &&
     config->width <= LG_NET_VIDEO_MAX_WIDTH && config->height &&
     config->height <= LG_NET_VIDEO_MAX_HEIGHT &&
-    config->refreshNumerator && config->refreshDenominator &&
+    (config->refreshNumerator == 0) ==
+      (config->refreshDenominator == 0) &&
     videoPixelFormatKnown(config->pixelFormat) &&
     videoChromaKnown(config->chromaSubsampling) &&
     (config->chromaSubsampling != LG_NET_VIDEO_CHROMA_420 ||
