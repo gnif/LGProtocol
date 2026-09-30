@@ -1,14 +1,15 @@
 # LGProtocol
 
 LGProtocol is a standalone, header-only distribution of the Looking Glass
-wire protocol declarations. Its install surface contains eight portable
-protocol headers.
+wire protocol declarations. Its install surface contains portable KVMFR and
+network transport protocol headers.
 
 Consumers include protocol declarations from the exported include root, for
 example:
 
 ```c
 #include <LGProtocol/KVMFR.h>
+#include <LGProtocol/NetworkServices.h>
 ```
 
 CMake packages expose the `LGProtocol::LGProtocol` interface target. The target

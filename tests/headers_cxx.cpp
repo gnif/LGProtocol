@@ -35,6 +35,12 @@
 #include <LGProtocol/LGMPConfig.h>
 #elif LGPROTOCOL_HEADER_ID == 8
 #include <LGProtocol/KVMFRTypes.h>
+#elif LGPROTOCOL_HEADER_ID == 9
+#include <LGProtocol/NetworkWire.h>
+#elif LGPROTOCOL_HEADER_ID == 10
+#include <LGProtocol/NetworkProtocol.h>
+#elif LGPROTOCOL_HEADER_ID == 11
+#include <LGProtocol/NetworkServices.h>
 #else
 #error Unsupported common-header selector
 #endif
