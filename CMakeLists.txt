@@ -83,6 +83,7 @@ install(FILES
   include/LGProtocol/KVMFRTypes.h
   include/LGProtocol/LGMPConfig.h
   include/LGProtocol/NetworkAuth.h
+  include/LGProtocol/NetworkClipboard.h
   include/LGProtocol/NetworkCRC32C.h
   include/LGProtocol/NetworkIdentity.h
   include/LGProtocol/NetworkPacket.h
