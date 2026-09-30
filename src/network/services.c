@@ -304,6 +304,12 @@ static bool coreStateKnown(LGNetCoreState state)
     state <= LG_NET_CORE_STATE_ERROR;
 }
 
+static bool coreGuestOSKnown(LGNetCoreGuestOS os)
+{
+  return os >= LG_NET_CORE_GUEST_OS_LINUX &&
+    os <= LG_NET_CORE_GUEST_OS_OTHER;
+}
+
 static bool coreErrorKnown(LGNetCoreErrorCode code)
 {
   return code >= LG_NET_CORE_ERROR_INVALID_REQUEST &&
@@ -388,6 +394,122 @@ LGNetParseResult lgNetCoreSessionInfoDecode(
       lgNetReaderConsumed(&reader) != expected)
     return LG_NET_PARSE_INVALID_VALUE;
   if (!lgNetCoreSessionInfoValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *info = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+size_t lgNetCoreGuestInfoSize(const LGNetCoreGuestInfo * info)
+{
+  size_t variableLength;
+  size_t size;
+  if (!info || info->versionLength > LG_NET_CORE_GUEST_MAX_VERSION_LENGTH ||
+      info->osNameLength > LG_NET_CORE_GUEST_MAX_OS_NAME_LENGTH ||
+      info->captureLength > LG_NET_CORE_GUEST_MAX_CAPTURE_LENGTH ||
+      info->cpuModelLength > LG_NET_CORE_GUEST_MAX_CPU_MODEL_LENGTH)
+    return 0;
+
+  variableLength = (size_t)info->versionLength + info->osNameLength +
+    info->captureLength + info->cpuModelLength;
+  return variableSize(LG_NET_CORE_GUEST_INFO_HEADER_WIRE_SIZE,
+    variableLength, LG_NET_CORE_GUEST_INFO_MAX_VARIABLE_LENGTH, &size) ?
+    size : 0;
+}
+
+bool lgNetCoreGuestInfoValid(const LGNetCoreGuestInfo * info)
+{
+  return info && coreGuestOSKnown(info->os) &&
+    info->versionLength <= LG_NET_CORE_GUEST_MAX_VERSION_LENGTH &&
+    (!info->versionLength || info->version) &&
+    info->osNameLength <= LG_NET_CORE_GUEST_MAX_OS_NAME_LENGTH &&
+    (!info->osNameLength || info->osName) &&
+    info->captureLength <= LG_NET_CORE_GUEST_MAX_CAPTURE_LENGTH &&
+    (!info->captureLength || info->capture) &&
+    info->cpuModelLength <= LG_NET_CORE_GUEST_MAX_CPU_MODEL_LENGTH &&
+    (!info->cpuModelLength || info->cpuModel) &&
+    lgNetCoreGuestInfoSize(info) != 0;
+}
+
+bool lgNetCoreGuestInfoEncode(
+    void * data, size_t size, const LGNetCoreGuestInfo * info)
+{
+  const size_t needed = lgNetCoreGuestInfoSize(info);
+  if (!data || !needed || size < needed || !lgNetCoreGuestInfoValid(info))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterBytes(&writer, info->uuid, sizeof(info->uuid)) &&
+    lgNetWriterU32  (&writer, info->os)                      &&
+    lgNetWriterU8   (&writer, info->processors)              &&
+    lgNetWriterU8   (&writer, info->cores)                   &&
+    lgNetWriterU8   (&writer, info->sockets)                 &&
+    lgNetWriterZero (&writer, 1)                             &&
+    lgNetWriterU16  (&writer, info->versionLength)           &&
+    lgNetWriterU16  (&writer, info->osNameLength)            &&
+    lgNetWriterU16  (&writer, info->captureLength)           &&
+    lgNetWriterU16  (&writer, info->cpuModelLength)          &&
+    lgNetWriterBytes(&writer, info->version, info->versionLength) &&
+    lgNetWriterBytes(&writer, info->osName, info->osNameLength)   &&
+    lgNetWriterBytes(&writer, info->capture, info->captureLength) &&
+    lgNetWriterBytes(&writer, info->cpuModel,
+      info->cpuModelLength)                                  &&
+    lgNetWriterSize (&writer) == needed;
+}
+
+LGNetParseResult lgNetCoreGuestInfoDecode(
+    LGNetCoreGuestInfo * info, const void * data, size_t size)
+{
+  if (!info || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_CORE_GUEST_INFO_HEADER_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetCoreGuestInfo decoded;
+  LGNetParseResult   result;
+  LGNetReader        reader;
+  size_t             expected;
+  size_t             variableLength;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderBytes(&reader, decoded.uuid, sizeof(decoded.uuid)) ||
+      !lgNetReaderU32  (&reader, &decoded.os)                       ||
+      !lgNetReaderU8   (&reader, &decoded.processors)               ||
+      !lgNetReaderU8   (&reader, &decoded.cores)                    ||
+      !lgNetReaderU8   (&reader, &decoded.sockets)                  ||
+      !lgNetReaderZero (&reader, 1)                                 ||
+      !lgNetReaderU16  (&reader, &decoded.versionLength)            ||
+      !lgNetReaderU16  (&reader, &decoded.osNameLength)             ||
+      !lgNetReaderU16  (&reader, &decoded.captureLength)            ||
+      !lgNetReaderU16  (&reader, &decoded.cpuModelLength))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  if (decoded.versionLength > LG_NET_CORE_GUEST_MAX_VERSION_LENGTH ||
+      decoded.osNameLength > LG_NET_CORE_GUEST_MAX_OS_NAME_LENGTH ||
+      decoded.captureLength > LG_NET_CORE_GUEST_MAX_CAPTURE_LENGTH ||
+      decoded.cpuModelLength > LG_NET_CORE_GUEST_MAX_CPU_MODEL_LENGTH)
+    return LG_NET_PARSE_INVALID_LENGTH;
+  variableLength = (size_t)decoded.versionLength + decoded.osNameLength +
+    decoded.captureLength + decoded.cpuModelLength;
+  result = variableDecodeSize(LG_NET_CORE_GUEST_INFO_HEADER_WIRE_SIZE,
+    variableLength, LG_NET_CORE_GUEST_INFO_MAX_VARIABLE_LENGTH,
+    size, &expected);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+
+  if (!lgNetReaderView(&reader, &decoded.version, decoded.versionLength) ||
+      !lgNetReaderView(&reader, &decoded.osName, decoded.osNameLength)   ||
+      !lgNetReaderView(&reader, &decoded.capture,
+        decoded.captureLength)                                         ||
+      !lgNetReaderView(&reader, &decoded.cpuModel,
+        decoded.cpuModelLength))
+    return LG_NET_PARSE_INVALID_VALUE;
+  result = fixedDecodeResult(&reader, expected, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetCoreGuestInfoValid(&decoded))
     return LG_NET_PARSE_INVALID_VALUE;
 
   *info = decoded;

@@ -236,7 +236,7 @@ bool lgNetMessageKnown(LGNetService service, uint16_t messageType)
   switch (service)
   {
     case LG_NET_SERVICE_CORE:
-      return messageType <= LG_NET_CORE_MESSAGE_ERROR;
+      return messageType <= LG_NET_CORE_MESSAGE_GUEST_INFO;
 
     case LG_NET_SERVICE_RECOVERY:
       return messageType <= LG_NET_RECOVERY_MESSAGE_STATUS;

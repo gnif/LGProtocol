@@ -38,6 +38,7 @@ extern "C" {
  * copied into the decoded structure. */
 
 /* Fixed boundaries must not move when a service's current version changes. */
+#define LG_NET_CORE_GUEST_INFO_INTRODUCED_SERVICE_VERSION 2U
 #define LG_NET_VIDEO_PYROWAVE_INTRODUCED_SERVICE_VERSION  1U
 #define LG_NET_CURSOR_SHAPE_INTRODUCED_SERVICE_VERSION    1U
 #define LG_NET_CURSOR_COLOR_TRANSFORM_INTRODUCED_SERVICE_VERSION \
@@ -137,11 +138,22 @@ extern "C" {
 #define LG_NET_USB_MAX_RESERVED_PAYLOAD_LENGTH    \
   (LG_NET_MAX_PAYLOAD_LENGTH - LG_NET_USB_RESERVED_HEADER_WIRE_SIZE)
 
-#define LG_NET_CORE_MAX_NAME_LENGTH               255U
-#define LG_NET_CORE_MAX_ERROR_TEXT_LENGTH         4096U
-#define LG_NET_CORE_SESSION_INFO_HEADER_WIRE_SIZE 48U
-#define LG_NET_CORE_STATUS_WIRE_SIZE              40U
-#define LG_NET_CORE_ERROR_HEADER_WIRE_SIZE        32U
+#define LG_NET_CORE_MAX_NAME_LENGTH                 255U
+#define LG_NET_CORE_MAX_ERROR_TEXT_LENGTH           4096U
+#define LG_NET_CORE_GUEST_MAX_VERSION_LENGTH        31U
+#define LG_NET_CORE_GUEST_MAX_OS_NAME_LENGTH        63U
+#define LG_NET_CORE_GUEST_MAX_CAPTURE_LENGTH        31U
+#define LG_NET_CORE_GUEST_MAX_CPU_MODEL_LENGTH      255U
+#define LG_NET_CORE_GUEST_UUID_LENGTH               16U
+#define LG_NET_CORE_SESSION_INFO_HEADER_WIRE_SIZE   48U
+#define LG_NET_CORE_GUEST_INFO_HEADER_WIRE_SIZE     32U
+#define LG_NET_CORE_STATUS_WIRE_SIZE                40U
+#define LG_NET_CORE_ERROR_HEADER_WIRE_SIZE          32U
+#define LG_NET_CORE_GUEST_INFO_MAX_VARIABLE_LENGTH  \
+  (LG_NET_CORE_GUEST_MAX_VERSION_LENGTH   +         \
+   LG_NET_CORE_GUEST_MAX_OS_NAME_LENGTH   +         \
+   LG_NET_CORE_GUEST_MAX_CAPTURE_LENGTH   +         \
+   LG_NET_CORE_GUEST_MAX_CPU_MODEL_LENGTH)
 
 #define LG_NET_RECOVERY_MAX_VERSION_LENGTH        255U
 #define LG_NET_RECOVERY_MAX_TIMEOUT_MS            120000U
@@ -208,6 +220,38 @@ typedef struct LGNetCoreSessionInfo
   const uint8_t *       name;
 }
 LGNetCoreSessionInfo;
+
+typedef uint32_t LGNetCoreGuestOS;
+
+enum
+{
+  LG_NET_CORE_GUEST_OS_LINUX   = 0,
+  LG_NET_CORE_GUEST_OS_BSD     = 1,
+  LG_NET_CORE_GUEST_OS_OSX     = 2,
+  LG_NET_CORE_GUEST_OS_WINDOWS = 3,
+  LG_NET_CORE_GUEST_OS_OTHER   = 4,
+};
+
+/* LG_NET_CORE_MESSAGE_GUEST_INFO. The UUID is all zero when unavailable.
+ * All strings are UTF-8 views with explicit lengths and no trailing NUL on
+ * the wire; decoders return borrowed views into the input buffer. */
+typedef struct LGNetCoreGuestInfo
+{
+  uint8_t          uuid[LG_NET_CORE_GUEST_UUID_LENGTH];
+  LGNetCoreGuestOS os;
+  uint8_t          processors;
+  uint8_t          cores;
+  uint8_t          sockets;
+  uint16_t         versionLength;
+  uint16_t         osNameLength;
+  uint16_t         captureLength;
+  uint16_t         cpuModelLength;
+  const uint8_t *  version;
+  const uint8_t *  osName;
+  const uint8_t *  capture;
+  const uint8_t *  cpuModel;
+}
+LGNetCoreGuestInfo;
 
 typedef uint32_t LGNetCoreState;
 
@@ -1687,6 +1731,13 @@ bool lgNetCoreSessionInfoEncode(
   void * data, size_t size, const LGNetCoreSessionInfo * info);
 LGNetParseResult lgNetCoreSessionInfoDecode(
   LGNetCoreSessionInfo * info, const void * data, size_t size);
+
+size_t lgNetCoreGuestInfoSize(const LGNetCoreGuestInfo * info);
+bool lgNetCoreGuestInfoValid(const LGNetCoreGuestInfo * info);
+bool lgNetCoreGuestInfoEncode(
+  void * data, size_t size, const LGNetCoreGuestInfo * info);
+LGNetParseResult lgNetCoreGuestInfoDecode(
+  LGNetCoreGuestInfo * info, const void * data, size_t size);
 
 bool lgNetCoreStatusValid(const LGNetCoreStatus * status);
 bool lgNetCoreStatusEncode(

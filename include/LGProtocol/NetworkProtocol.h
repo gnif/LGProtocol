@@ -54,8 +54,10 @@ extern "C" {
 #define LG_NET_ALPN                           "looking-glass/1"
 #define LG_NET_ALPN_LENGTH                    (sizeof(LG_NET_ALPN) - 1U)
 
-#define LG_NET_CORE_VERSION_CURRENT       1U
-#define LG_NET_CORE_VERSION_MIN           1U
+#define LG_NET_CORE_VERSION_INITIAL       1U
+#define LG_NET_CORE_VERSION_GUEST_INFO    2U
+#define LG_NET_CORE_VERSION_CURRENT       LG_NET_CORE_VERSION_GUEST_INFO
+#define LG_NET_CORE_VERSION_MIN           LG_NET_CORE_VERSION_INITIAL
 #define LG_NET_CORE_VERSION_MAX           LG_NET_CORE_VERSION_CURRENT
 #define LG_NET_RECOVERY_VERSION_CURRENT   1U
 #define LG_NET_RECOVERY_VERSION_MIN       1U
@@ -119,6 +121,7 @@ enum
   LG_NET_CORE_MESSAGE_PONG              = 11,
   LG_NET_CORE_MESSAGE_GOODBYE           = 12,
   LG_NET_CORE_MESSAGE_ERROR             = 13,
+  LG_NET_CORE_MESSAGE_GUEST_INFO        = 14,
 };
 
 typedef uint16_t LGNetRecoveryMessage;
