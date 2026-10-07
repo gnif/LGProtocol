@@ -35,6 +35,9 @@ static const LGNetVideoFrameFlags VIDEO_FRAME_FLAGS =
   LG_NET_VIDEO_FRAME_END_OF_STREAM |
   LG_NET_VIDEO_FRAME_HAS_CHECKSUM;
 
+static const LGNetVideoFrameUpdateFlags VIDEO_FRAME_UPDATE_FLAGS =
+  LG_NET_VIDEO_FRAME_UPDATE_HAS_CHECKSUM;
+
 static const LGNetVideoFragmentFlags VIDEO_FRAGMENT_FLAGS =
   LG_NET_VIDEO_FRAGMENT_BLOCK_START |
   LG_NET_VIDEO_FRAGMENT_BLOCK_END   |
@@ -1279,6 +1282,106 @@ LGNetParseResult lgNetVideoFrameDecode(
   return LG_NET_PARSE_OK;
 }
 
+size_t lgNetVideoFrameUpdateSize(const LGNetVideoFrameUpdate * update)
+{
+  size_t size;
+  return update && variableSize(LG_NET_VIDEO_FRAME_UPDATE_HEADER_WIRE_SIZE,
+    update->encodedLength, LG_NET_VIDEO_MAX_FRAME_UPDATE_LENGTH, &size) ?
+    size : 0;
+}
+
+bool lgNetVideoFrameUpdateValid(const LGNetVideoFrameUpdate * update)
+{
+  return update && update->streamID && videoCodecKnown(update->codec) &&
+    !(update->flags & ~VIDEO_FRAME_UPDATE_FLAGS) && update->configEpoch &&
+    update->frameID && update->baseFrameID &&
+    update->baseFrameID < update->frameID && update->captureTimestampNs &&
+    update->presentationTimestampNs && update->encodedLength && update->data &&
+    update->blockCount && update->blockCount <= LG_NET_VIDEO_MAX_BLOCKS &&
+    update->fragmentCount &&
+    update->fragmentCount <= LG_NET_VIDEO_MAX_FRAGMENTS &&
+    update->deadlineMs &&
+    ((update->flags & LG_NET_VIDEO_FRAME_UPDATE_HAS_CHECKSUM) ||
+      !update->checksum) &&
+    lgNetVideoFrameUpdateSize(update) != 0;
+}
+
+bool lgNetVideoFrameUpdateEncode(
+    void * data, size_t size, const LGNetVideoFrameUpdate * update)
+{
+  const size_t wireSize = lgNetVideoFrameUpdateSize(update);
+  if (!data || !wireSize || size < wireSize ||
+      !lgNetVideoFrameUpdateValid(update))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU32(&writer, update->streamID)                 &&
+    lgNetWriterU16(&writer, update->codec)                    &&
+    lgNetWriterU16(&writer, update->flags)                    &&
+    lgNetWriterU64(&writer, update->configEpoch)              &&
+    lgNetWriterU64(&writer, update->frameID)                  &&
+    lgNetWriterU64(&writer, update->baseFrameID)              &&
+    lgNetWriterU64(&writer, update->captureTimestampNs)       &&
+    lgNetWriterU64(&writer, update->presentationTimestampNs)  &&
+    lgNetWriterU32(&writer, update->encodedLength)            &&
+    lgNetWriterU32(&writer, update->blockCount)               &&
+    lgNetWriterU32(&writer, update->fragmentCount)            &&
+    lgNetWriterU32(&writer, update->deadlineMs)               &&
+    lgNetWriterU32(&writer, update->checksum)                 &&
+    lgNetWriterZero(&writer, 4)                               &&
+    lgNetWriterBytes(&writer, update->data,
+      update->encodedLength)                                  &&
+    lgNetWriterSize(&writer) == wireSize;
+}
+
+LGNetParseResult lgNetVideoFrameUpdateDecode(
+    LGNetVideoFrameUpdate * update, const void * data, size_t size)
+{
+  if (!update || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_VIDEO_FRAME_UPDATE_HEADER_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetVideoFrameUpdate decoded;
+  LGNetReader           reader;
+  size_t                expected;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU32(&reader, &decoded.streamID)                ||
+      !lgNetReaderU16(&reader, &decoded.codec)                   ||
+      !lgNetReaderU16(&reader, &decoded.flags)                   ||
+      !lgNetReaderU64(&reader, &decoded.configEpoch)             ||
+      !lgNetReaderU64(&reader, &decoded.frameID)                 ||
+      !lgNetReaderU64(&reader, &decoded.baseFrameID)             ||
+      !lgNetReaderU64(&reader, &decoded.captureTimestampNs)      ||
+      !lgNetReaderU64(&reader, &decoded.presentationTimestampNs) ||
+      !lgNetReaderU32(&reader, &decoded.encodedLength)           ||
+      !lgNetReaderU32(&reader, &decoded.blockCount)              ||
+      !lgNetReaderU32(&reader, &decoded.fragmentCount)           ||
+      !lgNetReaderU32(&reader, &decoded.deadlineMs)              ||
+      !lgNetReaderU32(&reader, &decoded.checksum)                ||
+      !lgNetReaderZero(&reader, 4))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  LGNetParseResult result = variableDecodeSize(
+    LG_NET_VIDEO_FRAME_UPDATE_HEADER_WIRE_SIZE, decoded.encodedLength,
+    LG_NET_VIDEO_MAX_FRAME_UPDATE_LENGTH, size, &expected);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetReaderView(&reader, &decoded.data, decoded.encodedLength))
+    return LG_NET_PARSE_INVALID_VALUE;
+  result = fixedDecodeResult(&reader, expected, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetVideoFrameUpdateValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *update = decoded;
+  return LG_NET_PARSE_OK;
+}
+
 size_t lgNetVideoFragmentSize(const LGNetVideoFragment * fragment)
 {
   size_t size;
@@ -1407,6 +1510,147 @@ LGNetParseResult lgNetVideoFragmentDecode(
   if (result != LG_NET_PARSE_OK)
     return result;
   if (!lgNetVideoFragmentValid(&decoded))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *fragment = decoded;
+  return LG_NET_PARSE_OK;
+}
+
+size_t lgNetVideoFrameUpdateFragmentSize(
+    const LGNetVideoFrameUpdateFragment * fragment)
+{
+  size_t size;
+  return fragment && variableSize(
+    LG_NET_VIDEO_FRAME_UPDATE_FRAGMENT_HEADER_WIRE_SIZE,
+    fragment->payloadLength,
+    LG_NET_VIDEO_MAX_FRAME_UPDATE_FRAGMENT_LENGTH, &size) ? size : 0;
+}
+
+bool lgNetVideoFrameUpdateFragmentValid(
+    const LGNetVideoFrameUpdateFragment * fragment)
+{
+  return fragment && fragment->streamID && fragment->configEpoch &&
+    fragment->frameID && fragment->baseFrameID &&
+    fragment->baseFrameID < fragment->frameID && fragment->frameLength &&
+    fragment->frameLength <= LG_NET_VIDEO_MAX_FRAME_UPDATE_LENGTH &&
+    fragment->fragmentCount &&
+    fragment->fragmentCount <= LG_NET_VIDEO_MAX_FRAGMENTS &&
+    fragment->fragmentIndex < fragment->fragmentCount &&
+    fragment->blockCount && fragment->blockCount <= LG_NET_VIDEO_MAX_BLOCKS &&
+    fragment->blockIndex < fragment->blockCount && fragment->blockLength &&
+    fragment->payloadLength && fragment->payload &&
+    !(fragment->flags & ~VIDEO_FRAGMENT_FLAGS) &&
+    fragment->frameOffset <= fragment->frameLength &&
+    fragment->payloadLength <= fragment->frameLength - fragment->frameOffset &&
+    fragment->blockOffset <= fragment->blockLength &&
+    fragment->payloadLength <= fragment->blockLength - fragment->blockOffset &&
+    fragment->frameOffset >= fragment->blockOffset &&
+    fragment->blockLength <= fragment->frameLength -
+      (fragment->frameOffset - fragment->blockOffset) &&
+    (!!(fragment->flags & LG_NET_VIDEO_FRAGMENT_BLOCK_START) ==
+      (fragment->blockOffset == 0)) &&
+    (!!(fragment->flags & LG_NET_VIDEO_FRAGMENT_BLOCK_END) ==
+      (fragment->blockOffset + fragment->payloadLength ==
+        fragment->blockLength)) &&
+    (!(fragment->flags & LG_NET_VIDEO_FRAGMENT_FRAME_END) ||
+      fragment->frameOffset + fragment->payloadLength ==
+        fragment->frameLength) &&
+    (!!(fragment->flags & LG_NET_VIDEO_FRAGMENT_RECOVERY) ==
+      !!fragment->recoveryCount) &&
+    fragment->recoveryType <= LG_NET_VIDEO_RECOVERY_DUPLICATE &&
+    (!!(fragment->flags & LG_NET_VIDEO_FRAGMENT_RECOVERY) ==
+      (fragment->recoveryType != LG_NET_VIDEO_RECOVERY_NONE)) &&
+    (!(fragment->flags & LG_NET_VIDEO_FRAGMENT_RECOVERY) ||
+      (fragment->recoveryGroup && fragment->recoveryCount > 1 &&
+        fragment->recoveryIndex < fragment->recoveryCount)) &&
+    ((fragment->flags & LG_NET_VIDEO_FRAGMENT_RECOVERY) ||
+      (!fragment->recoveryGroup && !fragment->recoveryIndex)) &&
+    ((fragment->flags & LG_NET_VIDEO_FRAGMENT_CHECKSUM) ||
+      !fragment->checksum) &&
+    lgNetVideoFrameUpdateFragmentSize(fragment) != 0;
+}
+
+bool lgNetVideoFrameUpdateFragmentEncode(void * data, size_t size,
+    const LGNetVideoFrameUpdateFragment * fragment)
+{
+  const size_t wireSize = lgNetVideoFrameUpdateFragmentSize(fragment);
+  if (!data || !wireSize || size < wireSize ||
+      !lgNetVideoFrameUpdateFragmentValid(fragment))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  return
+    lgNetWriterU32 (&writer, fragment->streamID)       &&
+    lgNetWriterU16 (&writer, fragment->flags)          &&
+    lgNetWriterU16 (&writer, fragment->recoveryType)   &&
+    lgNetWriterU64 (&writer, fragment->configEpoch)    &&
+    lgNetWriterU64 (&writer, fragment->frameID)        &&
+    lgNetWriterU64 (&writer, fragment->baseFrameID)    &&
+    lgNetWriterU32 (&writer, fragment->frameOffset)    &&
+    lgNetWriterU32 (&writer, fragment->frameLength)    &&
+    lgNetWriterU32 (&writer, fragment->blockIndex)     &&
+    lgNetWriterU32 (&writer, fragment->blockOffset)    &&
+    lgNetWriterU32 (&writer, fragment->blockLength)    &&
+    lgNetWriterU32 (&writer, fragment->blockCount)     &&
+    lgNetWriterU32 (&writer, fragment->fragmentIndex)  &&
+    lgNetWriterU32 (&writer, fragment->fragmentCount)  &&
+    lgNetWriterU32 (&writer, fragment->recoveryGroup)  &&
+    lgNetWriterU16 (&writer, fragment->recoveryIndex)  &&
+    lgNetWriterU16 (&writer, fragment->recoveryCount)  &&
+    lgNetWriterU32 (&writer, fragment->payloadLength)  &&
+    lgNetWriterU32 (&writer, fragment->checksum)       &&
+    lgNetWriterBytes(&writer, fragment->payload,
+      fragment->payloadLength)                         &&
+    lgNetWriterSize(&writer) == wireSize;
+}
+
+LGNetParseResult lgNetVideoFrameUpdateFragmentDecode(
+    LGNetVideoFrameUpdateFragment * fragment, const void * data, size_t size)
+{
+  if (!fragment || !data)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_VIDEO_FRAME_UPDATE_FRAGMENT_HEADER_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetVideoFrameUpdateFragment decoded;
+  LGNetReader                  reader;
+  size_t                       expected;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU32 (&reader, &decoded.streamID)       ||
+      !lgNetReaderU16 (&reader, &decoded.flags)          ||
+      !lgNetReaderU16 (&reader, &decoded.recoveryType)   ||
+      !lgNetReaderU64 (&reader, &decoded.configEpoch)    ||
+      !lgNetReaderU64 (&reader, &decoded.frameID)        ||
+      !lgNetReaderU64 (&reader, &decoded.baseFrameID)    ||
+      !lgNetReaderU32 (&reader, &decoded.frameOffset)    ||
+      !lgNetReaderU32 (&reader, &decoded.frameLength)    ||
+      !lgNetReaderU32 (&reader, &decoded.blockIndex)     ||
+      !lgNetReaderU32 (&reader, &decoded.blockOffset)    ||
+      !lgNetReaderU32 (&reader, &decoded.blockLength)    ||
+      !lgNetReaderU32 (&reader, &decoded.blockCount)     ||
+      !lgNetReaderU32 (&reader, &decoded.fragmentIndex)  ||
+      !lgNetReaderU32 (&reader, &decoded.fragmentCount)  ||
+      !lgNetReaderU32 (&reader, &decoded.recoveryGroup)  ||
+      !lgNetReaderU16 (&reader, &decoded.recoveryIndex)  ||
+      !lgNetReaderU16 (&reader, &decoded.recoveryCount)  ||
+      !lgNetReaderU32 (&reader, &decoded.payloadLength)  ||
+      !lgNetReaderU32 (&reader, &decoded.checksum))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  LGNetParseResult result = variableDecodeSize(
+    LG_NET_VIDEO_FRAME_UPDATE_FRAGMENT_HEADER_WIRE_SIZE,
+    decoded.payloadLength, LG_NET_VIDEO_MAX_FRAME_UPDATE_FRAGMENT_LENGTH,
+    size, &expected);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetReaderView(&reader, &decoded.payload, decoded.payloadLength))
+    return LG_NET_PARSE_INVALID_VALUE;
+  result = fixedDecodeResult(&reader, expected, size);
+  if (result != LG_NET_PARSE_OK)
+    return result;
+  if (!lgNetVideoFrameUpdateFragmentValid(&decoded))
     return LG_NET_PARSE_INVALID_VALUE;
 
   *fragment = decoded;

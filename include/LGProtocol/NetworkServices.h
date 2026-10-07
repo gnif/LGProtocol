@@ -57,15 +57,23 @@ extern "C" {
 #define LG_NET_VIDEO_MAX_WIDTH                    16384U
 #define LG_NET_VIDEO_MAX_HEIGHT                   16384U
 #define LG_NET_VIDEO_MAX_PLANES                   4U
-#define LG_NET_VIDEO_STREAM_CONFIG_WIRE_SIZE      60U
-#define LG_NET_VIDEO_FRAME_HEADER_WIRE_SIZE       60U
-#define LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE    72U
-#define LG_NET_VIDEO_FEEDBACK_WIRE_SIZE           56U
-#define LG_NET_VIDEO_MAX_FRAME_LENGTH             \
+
+#define LG_NET_VIDEO_STREAM_CONFIG_WIRE_SIZE                60U
+#define LG_NET_VIDEO_FRAME_HEADER_WIRE_SIZE                 60U
+#define LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE              72U
+#define LG_NET_VIDEO_FRAME_UPDATE_HEADER_WIRE_SIZE          72U
+#define LG_NET_VIDEO_FRAME_UPDATE_FRAGMENT_HEADER_WIRE_SIZE 80U
+#define LG_NET_VIDEO_FEEDBACK_WIRE_SIZE                     56U
+
+#define LG_NET_VIDEO_MAX_FRAME_LENGTH                 \
   (LG_NET_MAX_PAYLOAD_LENGTH - LG_NET_VIDEO_FRAME_HEADER_WIRE_SIZE)
-#define LG_NET_VIDEO_MAX_FRAGMENT_LENGTH          65535U
-#define LG_NET_VIDEO_MAX_FRAGMENTS                1048576U
-#define LG_NET_VIDEO_MAX_BLOCKS                   1048576U
+#define LG_NET_VIDEO_MAX_FRAME_UPDATE_LENGTH          \
+  (LG_NET_MAX_PAYLOAD_LENGTH - LG_NET_VIDEO_FRAME_UPDATE_HEADER_WIRE_SIZE)
+#define LG_NET_VIDEO_MAX_FRAGMENT_LENGTH              65535U
+#define LG_NET_VIDEO_MAX_FRAME_UPDATE_FRAGMENT_LENGTH \
+  LG_NET_VIDEO_MAX_FRAGMENT_LENGTH
+#define LG_NET_VIDEO_MAX_FRAGMENTS                    1048576U
+#define LG_NET_VIDEO_MAX_BLOCKS                       1048576U
 
 #define LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_INITIAL 1U
 #define LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_CURRENT 1U
@@ -73,6 +81,13 @@ extern "C" {
   LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_INITIAL
 #define LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_MAX     \
   LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_CURRENT
+#define LG_NET_VIDEO_PYROWAVE_MODE_SHIFT            24U
+#define LG_NET_VIDEO_PYROWAVE_MODE_MASK             3U
+#define LG_NET_VIDEO_PYROWAVE_MODE_FULL             0U
+#define LG_NET_VIDEO_PYROWAVE_MODE_DELTA            1U
+#define LG_NET_VIDEO_PYROWAVE_CLEAR_PACKET_WORDS    2U
+#define LG_NET_VIDEO_PYROWAVE_CLEAR_PACKET_SIZE     \
+  (LG_NET_VIDEO_PYROWAVE_CLEAR_PACKET_WORDS * 4U)
 
 #define LG_NET_CURSOR_MAX_WIDTH                   4096U
 #define LG_NET_CURSOR_MAX_HEIGHT                  4096U
@@ -593,6 +608,45 @@ typedef struct LGNetVideoFrame
 }
 LGNetVideoFrame;
 
+typedef uint16_t LGNetVideoFrameUpdateFlags;
+
+enum
+{
+  LG_NET_VIDEO_FRAME_UPDATE_HAS_CHECKSUM = 1U << 0,
+};
+
+/* A frame update applies encoded block replacements to baseFrameID and
+ * produces frameID. Updates sharing a baseFrameID are cumulative: each newer
+ * update carries the current replacement or codec-defined clear operation
+ * for every block changed by any earlier update from that base. A receiver
+ * may therefore discard an incomplete or undecoded older update when a newer
+ * update with the same base arrives. Checksum uses the same CRC-32C definition
+ * as a full frame and is zero when
+ * LG_NET_VIDEO_FRAME_UPDATE_HAS_CHECKSUM is clear.
+ *
+ * PyroWave codec version 1 stores LG_NET_VIDEO_PYROWAVE_MODE_* in bits
+ * LG_NET_VIDEO_PYROWAVE_MODE_SHIFT through +1 of the sequence header's second
+ * word. DELTA packets with a zero coefficient ballot contain exactly
+ * LG_NET_VIDEO_PYROWAVE_CLEAR_PACKET_WORDS words and clear that block. */
+typedef struct LGNetVideoFrameUpdate
+{
+  uint32_t                   streamID;
+  LGNetVideoCodec            codec;
+  LGNetVideoFrameUpdateFlags flags;
+  uint64_t                   configEpoch;
+  uint64_t                   frameID;
+  uint64_t                   baseFrameID;
+  uint64_t                   captureTimestampNs;
+  uint64_t                   presentationTimestampNs;
+  uint32_t                   encodedLength;
+  uint32_t                   blockCount;
+  uint32_t                   fragmentCount;
+  uint32_t                   deadlineMs;
+  uint32_t                   checksum;
+  const uint8_t *            data;
+}
+LGNetVideoFrameUpdate;
+
 typedef uint16_t LGNetVideoFragmentFlags;
 
 enum
@@ -645,6 +699,33 @@ typedef struct LGNetVideoFragment
   const uint8_t *         payload;
 }
 LGNetVideoFragment;
+
+/* A frame update fragment follows the full-frame fragment rules, but its
+ * encoded payload applies to baseFrameID to produce frameID. */
+typedef struct LGNetVideoFrameUpdateFragment
+{
+  uint32_t                streamID;
+  LGNetVideoFragmentFlags flags;
+  LGNetVideoRecoveryType  recoveryType;
+  uint64_t                configEpoch;
+  uint64_t                frameID;
+  uint64_t                baseFrameID;
+  uint32_t                frameOffset;
+  uint32_t                frameLength;
+  uint32_t                blockIndex;
+  uint32_t                blockOffset;
+  uint32_t                blockLength;
+  uint32_t                blockCount;
+  uint32_t                fragmentIndex;
+  uint32_t                fragmentCount;
+  uint32_t                recoveryGroup;
+  uint16_t                recoveryIndex;
+  uint16_t                recoveryCount;
+  uint32_t                payloadLength;
+  uint32_t                checksum;
+  const uint8_t *         payload;
+}
+LGNetVideoFrameUpdateFragment;
 
 typedef uint32_t LGNetVideoFeedbackFlags;
 
@@ -1796,12 +1877,28 @@ bool lgNetVideoFrameEncode(
 LGNetParseResult lgNetVideoFrameDecode(
   LGNetVideoFrame * frame, const void * data, size_t size);
 
+size_t lgNetVideoFrameUpdateSize(const LGNetVideoFrameUpdate * update);
+bool lgNetVideoFrameUpdateValid(const LGNetVideoFrameUpdate * update);
+bool lgNetVideoFrameUpdateEncode(
+  void * data, size_t size, const LGNetVideoFrameUpdate * update);
+LGNetParseResult lgNetVideoFrameUpdateDecode(
+  LGNetVideoFrameUpdate * update, const void * data, size_t size);
+
 size_t lgNetVideoFragmentSize(const LGNetVideoFragment * fragment);
 bool lgNetVideoFragmentValid(const LGNetVideoFragment * fragment);
 bool lgNetVideoFragmentEncode(
   void * data, size_t size, const LGNetVideoFragment * fragment);
 LGNetParseResult lgNetVideoFragmentDecode(
   LGNetVideoFragment * fragment, const void * data, size_t size);
+
+size_t lgNetVideoFrameUpdateFragmentSize(
+  const LGNetVideoFrameUpdateFragment * fragment);
+bool lgNetVideoFrameUpdateFragmentValid(
+  const LGNetVideoFrameUpdateFragment * fragment);
+bool lgNetVideoFrameUpdateFragmentEncode(void * data, size_t size,
+  const LGNetVideoFrameUpdateFragment * fragment);
+LGNetParseResult lgNetVideoFrameUpdateFragmentDecode(
+  LGNetVideoFrameUpdateFragment * fragment, const void * data, size_t size);
 
 bool lgNetVideoFeedbackValid(const LGNetVideoFeedback * feedback);
 bool lgNetVideoFeedbackEncode(

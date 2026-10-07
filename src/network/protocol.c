@@ -242,7 +242,7 @@ bool lgNetMessageKnown(LGNetService service, uint16_t messageType)
       return messageType <= LG_NET_RECOVERY_MESSAGE_STATUS;
 
     case LG_NET_SERVICE_VIDEO:
-      return messageType <= LG_NET_VIDEO_MESSAGE_STATUS;
+      return messageType <= LG_NET_VIDEO_MESSAGE_FRAME_UPDATE_FRAGMENT;
 
     case LG_NET_SERVICE_CURSOR:
       return messageType <= LG_NET_CURSOR_MESSAGE_COLOR_TRANSFORM;
