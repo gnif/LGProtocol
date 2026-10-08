@@ -33,7 +33,9 @@ extern "C" {
 #endif
 
 /* Dedicated QUIC streams begin with this binding before carrying normal
- * envelope-framed packets. The little-endian magic bytes spell "LGSB". */
+ * envelope-framed packets. A zero flags value identifies a bidirectional
+ * service stream. Bulk streams are unidirectional. The little-endian magic
+ * bytes spell "LGSB". */
 #define LG_NET_STREAM_BINDING_MAGIC        UINT32_C(0x4253474c)
 #define LG_NET_STREAM_BINDING_VERSION      1U
 #define LG_NET_STREAM_BINDING_WIRE_SIZE    32U

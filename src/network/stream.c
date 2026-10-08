@@ -46,6 +46,15 @@ void lgNetStreamBindingInit(LGNetStreamBinding * binding,
 
 bool lgNetStreamBindingValid(const LGNetStreamBinding * binding)
 {
+  const LGNetStreamBindingFlags flags         = binding ? binding->flags : 0;
+  const bool                    bidirectional = flags == 0;
+  const bool                    bulk          = flags ==
+    (LG_NET_STREAM_BINDING_UNIDIRECTIONAL |
+      LG_NET_STREAM_BINDING_BULK);
+  const uint64_t                initiator     = binding &&
+    binding->originRole == LG_NET_ROLE_SERVER ? 1U : 0U;
+  const uint64_t                direction     = bulk ? 2U : 0U;
+
   return binding &&
     binding->version == LG_NET_STREAM_BINDING_VERSION &&
     binding->headerSize == LG_NET_STREAM_BINDING_WIRE_SIZE &&
@@ -53,9 +62,9 @@ bool lgNetStreamBindingValid(const LGNetStreamBinding * binding)
     binding->service <= LG_NET_SERVICE_CONTROL &&
     (binding->originRole == LG_NET_ROLE_CLIENT ||
       binding->originRole == LG_NET_ROLE_SERVER) &&
-    !(binding->flags & ~STREAM_BINDING_FLAGS) &&
-    (binding->flags & LG_NET_STREAM_BINDING_UNIDIRECTIONAL) &&
-    binding->streamID && binding->sessionEpoch;
+    !(flags & ~STREAM_BINDING_FLAGS) && (bidirectional || bulk) &&
+    (binding->streamID & 3U) == (initiator | direction) &&
+    binding->sessionEpoch;
 }
 
 bool lgNetStreamBindingEncode(void * data, size_t size,

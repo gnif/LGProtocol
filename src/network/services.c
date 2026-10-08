@@ -2914,8 +2914,8 @@ bool lgNetInputRelativeEncode(
   return
     lgNetWriterU64(&writer, relative->sequence)       &&
     lgNetWriterU64(&writer, relative->timestampNs)    &&
-    lgNetWriterI32(&writer, relative->deltaX)         &&
-    lgNetWriterI32(&writer, relative->deltaY)         &&
+    lgNetWriterI64(&writer, relative->cumulativeX)    &&
+    lgNetWriterI64(&writer, relative->cumulativeY)    &&
     lgNetWriterI32(&writer, relative->wheelX)         &&
     lgNetWriterI32(&writer, relative->wheelY)         &&
     lgNetWriterU32(&writer, relative->buttons)        &&
@@ -2935,13 +2935,13 @@ LGNetParseResult lgNetInputRelativeDecode(
   LGNetReader        reader;
   memset(&decoded, 0, sizeof(decoded));
   lgNetReaderInit(&reader, data, size);
-  if (!lgNetReaderU64(&reader, &decoded.sequence)       ||
-      !lgNetReaderU64(&reader, &decoded.timestampNs)    ||
-      !lgNetReaderI32(&reader, &decoded.deltaX)         ||
-      !lgNetReaderI32(&reader, &decoded.deltaY)         ||
-      !lgNetReaderI32(&reader, &decoded.wheelX)         ||
-      !lgNetReaderI32(&reader, &decoded.wheelY)         ||
-      !lgNetReaderU32(&reader, &decoded.buttons)        ||
+  if (!lgNetReaderU64(&reader, &decoded.sequence)        ||
+      !lgNetReaderU64(&reader, &decoded.timestampNs)     ||
+      !lgNetReaderI64(&reader, &decoded.cumulativeX)     ||
+      !lgNetReaderI64(&reader, &decoded.cumulativeY)     ||
+      !lgNetReaderI32(&reader, &decoded.wheelX)          ||
+      !lgNetReaderI32(&reader, &decoded.wheelY)          ||
+      !lgNetReaderU32(&reader, &decoded.buttons)         ||
       !lgNetReaderU32(&reader, &decoded.changedButtons))
     return LG_NET_PARSE_INVALID_VALUE;
 
@@ -2980,16 +2980,18 @@ bool lgNetInputAbsoluteEncode(
   LGNetWriter writer;
   lgNetWriterInit(&writer, data, size);
   return
-    lgNetWriterU64(&writer, absolute->sequence)       &&
-    lgNetWriterU64(&writer, absolute->timestampNs)    &&
-    lgNetWriterI32(&writer, absolute->x)              &&
-    lgNetWriterI32(&writer, absolute->y)              &&
-    lgNetWriterU32(&writer, absolute->width)          &&
-    lgNetWriterU32(&writer, absolute->height)         &&
-    lgNetWriterI32(&writer, absolute->wheelX)         &&
-    lgNetWriterI32(&writer, absolute->wheelY)         &&
-    lgNetWriterU32(&writer, absolute->buttons)        &&
-    lgNetWriterU32(&writer, absolute->changedButtons) &&
+    lgNetWriterU64(&writer, absolute->sequence)        &&
+    lgNetWriterU64(&writer, absolute->timestampNs)     &&
+    lgNetWriterI64(&writer, absolute->cumulativeX)     &&
+    lgNetWriterI64(&writer, absolute->cumulativeY)     &&
+    lgNetWriterI32(&writer, absolute->x)               &&
+    lgNetWriterI32(&writer, absolute->y)               &&
+    lgNetWriterU32(&writer, absolute->width)           &&
+    lgNetWriterU32(&writer, absolute->height)          &&
+    lgNetWriterI32(&writer, absolute->wheelX)          &&
+    lgNetWriterI32(&writer, absolute->wheelY)          &&
+    lgNetWriterU32(&writer, absolute->buttons)         &&
+    lgNetWriterU32(&writer, absolute->changedButtons)  &&
     lgNetWriterSize(&writer) == LG_NET_INPUT_ABSOLUTE_WIRE_SIZE;
 }
 
@@ -3005,15 +3007,17 @@ LGNetParseResult lgNetInputAbsoluteDecode(
   LGNetReader        reader;
   memset(&decoded, 0, sizeof(decoded));
   lgNetReaderInit(&reader, data, size);
-  if (!lgNetReaderU64(&reader, &decoded.sequence)       ||
-      !lgNetReaderU64(&reader, &decoded.timestampNs)    ||
-      !lgNetReaderI32(&reader, &decoded.x)              ||
-      !lgNetReaderI32(&reader, &decoded.y)              ||
-      !lgNetReaderU32(&reader, &decoded.width)          ||
-      !lgNetReaderU32(&reader, &decoded.height)         ||
-      !lgNetReaderI32(&reader, &decoded.wheelX)         ||
-      !lgNetReaderI32(&reader, &decoded.wheelY)         ||
-      !lgNetReaderU32(&reader, &decoded.buttons)        ||
+  if (!lgNetReaderU64(&reader, &decoded.sequence)        ||
+      !lgNetReaderU64(&reader, &decoded.timestampNs)     ||
+      !lgNetReaderI64(&reader, &decoded.cumulativeX)     ||
+      !lgNetReaderI64(&reader, &decoded.cumulativeY)     ||
+      !lgNetReaderI32(&reader, &decoded.x)               ||
+      !lgNetReaderI32(&reader, &decoded.y)               ||
+      !lgNetReaderU32(&reader, &decoded.width)           ||
+      !lgNetReaderU32(&reader, &decoded.height)          ||
+      !lgNetReaderI32(&reader, &decoded.wheelX)          ||
+      !lgNetReaderI32(&reader, &decoded.wheelY)          ||
+      !lgNetReaderU32(&reader, &decoded.buttons)         ||
       !lgNetReaderU32(&reader, &decoded.changedButtons))
     return LG_NET_PARSE_INVALID_VALUE;
 

@@ -110,8 +110,8 @@ extern "C" {
 
 #define LG_NET_INPUT_CLAIM_WIRE_SIZE              24U
 #define LG_NET_INPUT_STATUS_WIRE_SIZE             32U
-#define LG_NET_INPUT_RELATIVE_WIRE_SIZE           40U
-#define LG_NET_INPUT_ABSOLUTE_WIRE_SIZE           48U
+#define LG_NET_INPUT_RELATIVE_WIRE_SIZE           48U
+#define LG_NET_INPUT_ABSOLUTE_WIRE_SIZE           64U
 #define LG_NET_INPUT_KEYBOARD_WIRE_SIZE           32U
 #define LG_NET_INPUT_LEDS_WIRE_SIZE               16U
 #define LG_NET_INPUT_ABSOLUTE_MAX_WIDTH           32768U
@@ -1094,7 +1094,9 @@ enum
   LG_NET_INPUT_STATUS_ERROR       = 6,
 };
 
-/* LG_NET_INPUT_MESSAGE_CLAIM_RESULT and LG_NET_INPUT_MESSAGE_STATUS. */
+/* LG_NET_INPUT_MESSAGE_CLAIM_RESULT and LG_NET_INPUT_MESSAGE_STATUS.
+ * A STATUS response to an acknowledged input event echoes the event sequence
+ * in requestID after the receiver has applied the reliable state transition. */
 typedef struct LGNetInputStatus
 {
   uint64_t             claimEpoch;
@@ -1158,14 +1160,17 @@ typedef struct LGNetInputControl
 LGNetInputControl;
 
 /* Mouse payloads carry the complete post-event button state in buttons and
- * the transition mask in changedButtons, including button-only events where
- * every motion and wheel field is zero. */
+ * the transition mask in changedButtons. Relative motion uses cumulative
+ * counters so a newer datagram also recovers movement from a lost datagram.
+ * Absolute packets carry the current counters to rebase relative motion when
+ * switching modes. Reliable mode/baseline packets and button or wheel
+ * transitions use an acknowledgement barrier before later datagram motion. */
 typedef struct LGNetInputRelative
 {
   uint64_t            sequence;
   uint64_t            timestampNs;
-  int32_t             deltaX;
-  int32_t             deltaY;
+  int64_t             cumulativeX;
+  int64_t             cumulativeY;
   int32_t             wheelX;
   int32_t             wheelY;
   LGNetPointerButtons buttons;
@@ -1177,6 +1182,8 @@ typedef struct LGNetInputAbsolute
 {
   uint64_t            sequence;
   uint64_t            timestampNs;
+  int64_t             cumulativeX;
+  int64_t             cumulativeY;
   int32_t             x;
   int32_t             y;
   uint32_t            width;
