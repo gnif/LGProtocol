@@ -72,9 +72,9 @@ extern "C" {
 #define LG_NET_VIDEO_MAX_FRAGMENT_LENGTH              65535U
 #define LG_NET_VIDEO_MAX_FRAME_UPDATE_FRAGMENT_LENGTH \
   LG_NET_VIDEO_MAX_FRAGMENT_LENGTH
-#define LG_NET_VIDEO_MAX_FRAGMENTS                    1048576U
+#define LG_NET_VIDEO_MAX_FRAGMENTS                    2097152U
 #define LG_NET_VIDEO_MAX_BLOCKS                       1048576U
-#define LG_NET_VIDEO_MAX_DAMAGE_RECTS                  64U
+#define LG_NET_VIDEO_MAX_DAMAGE_RECTS                  256U
 #define LG_NET_VIDEO_DAMAGE_HEADER_WIRE_SIZE           4U
 #define LG_NET_VIDEO_DAMAGE_RECT_WIRE_SIZE             8U
 
