@@ -74,6 +74,9 @@ extern "C" {
   LG_NET_VIDEO_MAX_FRAGMENT_LENGTH
 #define LG_NET_VIDEO_MAX_FRAGMENTS                    1048576U
 #define LG_NET_VIDEO_MAX_BLOCKS                       1048576U
+#define LG_NET_VIDEO_MAX_DAMAGE_RECTS                  64U
+#define LG_NET_VIDEO_DAMAGE_HEADER_WIRE_SIZE           4U
+#define LG_NET_VIDEO_DAMAGE_RECT_WIRE_SIZE             8U
 
 #define LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_INITIAL 1U
 #define LG_NET_VIDEO_PYROWAVE_CODEC_VERSION_CURRENT 1U
@@ -607,6 +610,33 @@ typedef struct LGNetVideoFrame
   const uint8_t *      data;
 }
 LGNetVideoFrame;
+
+typedef uint16_t LGNetVideoDamageFlags;
+
+enum
+{
+  LG_NET_VIDEO_DAMAGE_FULL = 1U << 0,
+};
+
+typedef struct LGNetVideoDamageRect
+{
+  uint16_t x;
+  uint16_t y;
+  uint16_t width;
+  uint16_t height;
+}
+LGNetVideoDamageRect;
+
+/* Damage metadata follows the PyroWave delta sequence header. A zero count
+ * with LG_NET_VIDEO_DAMAGE_FULL set damages the full frame, while a zero
+ * count and no flags reports no presentation damage. */
+typedef struct LGNetVideoDamage
+{
+  LGNetVideoDamageFlags flags;
+  uint16_t              count;
+  LGNetVideoDamageRect  rects[LG_NET_VIDEO_MAX_DAMAGE_RECTS];
+}
+LGNetVideoDamage;
 
 typedef uint16_t LGNetVideoFrameUpdateFlags;
 
@@ -1876,6 +1906,16 @@ bool lgNetVideoFrameEncode(
   void * data, size_t size, const LGNetVideoFrame * frame);
 LGNetParseResult lgNetVideoFrameDecode(
   LGNetVideoFrame * frame, const void * data, size_t size);
+
+size_t lgNetVideoDamageSize(const LGNetVideoDamage * damage);
+bool lgNetVideoDamageValid(const LGNetVideoDamage * damage,
+  uint32_t frameWidth, uint32_t frameHeight);
+bool lgNetVideoDamageEncode(void * data, size_t size,
+  const LGNetVideoDamage * damage, uint32_t frameWidth,
+  uint32_t frameHeight);
+LGNetParseResult lgNetVideoDamageDecode(LGNetVideoDamage * damage,
+  const void * data, size_t size, uint32_t frameWidth,
+  uint32_t frameHeight, size_t * consumed);
 
 size_t lgNetVideoFrameUpdateSize(const LGNetVideoFrameUpdate * update);
 bool lgNetVideoFrameUpdateValid(const LGNetVideoFrameUpdate * update);

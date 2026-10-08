@@ -1282,6 +1282,109 @@ LGNetParseResult lgNetVideoFrameDecode(
   return LG_NET_PARSE_OK;
 }
 
+size_t lgNetVideoDamageSize(const LGNetVideoDamage * damage)
+{
+  return damage && damage->count <= LG_NET_VIDEO_MAX_DAMAGE_RECTS ?
+    LG_NET_VIDEO_DAMAGE_HEADER_WIRE_SIZE +
+      (size_t)damage->count * LG_NET_VIDEO_DAMAGE_RECT_WIRE_SIZE : 0;
+}
+
+static bool videoDamageRectValid(const LGNetVideoDamageRect * rect,
+    uint32_t frameWidth, uint32_t frameHeight)
+{
+  return rect && rect->width && rect->height && rect->x < frameWidth &&
+    rect->y < frameHeight && rect->width <= frameWidth - rect->x &&
+    rect->height <= frameHeight - rect->y;
+}
+
+bool lgNetVideoDamageValid(const LGNetVideoDamage * damage,
+    uint32_t frameWidth, uint32_t frameHeight)
+{
+  if (!damage || !frameWidth || frameWidth > LG_NET_VIDEO_MAX_WIDTH ||
+      !frameHeight || frameHeight > LG_NET_VIDEO_MAX_HEIGHT ||
+      damage->count > LG_NET_VIDEO_MAX_DAMAGE_RECTS ||
+      (damage->flags & ~LG_NET_VIDEO_DAMAGE_FULL) ||
+      ((damage->flags & LG_NET_VIDEO_DAMAGE_FULL) && damage->count))
+    return false;
+
+  for (uint16_t i = 0; i < damage->count; ++i)
+    if (!videoDamageRectValid(&damage->rects[i], frameWidth, frameHeight))
+      return false;
+
+  return true;
+}
+
+bool lgNetVideoDamageEncode(void * data, size_t size,
+    const LGNetVideoDamage * damage, uint32_t frameWidth,
+    uint32_t frameHeight)
+{
+  const size_t wireSize = lgNetVideoDamageSize(damage);
+  if (!data || !wireSize || size < wireSize ||
+      !lgNetVideoDamageValid(damage, frameWidth, frameHeight))
+    return false;
+
+  LGNetWriter writer;
+  lgNetWriterInit(&writer, data, size);
+  if (!lgNetWriterU16(&writer, damage->flags) ||
+      !lgNetWriterU16(&writer, damage->count))
+    return false;
+
+  for (uint16_t i = 0; i < damage->count; ++i)
+  {
+    const LGNetVideoDamageRect * rect = &damage->rects[i];
+    if (!lgNetWriterU16(&writer, rect->x)     ||
+        !lgNetWriterU16(&writer, rect->y)     ||
+        !lgNetWriterU16(&writer, rect->width) ||
+        !lgNetWriterU16(&writer, rect->height))
+      return false;
+  }
+
+  return lgNetWriterSize(&writer) == wireSize;
+}
+
+LGNetParseResult lgNetVideoDamageDecode(LGNetVideoDamage * damage,
+    const void * data, size_t size, uint32_t frameWidth,
+    uint32_t frameHeight, size_t * consumed)
+{
+  if (!damage || !data || !consumed)
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (size < LG_NET_VIDEO_DAMAGE_HEADER_WIRE_SIZE)
+    return LG_NET_PARSE_TRUNCATED;
+
+  LGNetVideoDamage decoded;
+  LGNetReader      reader;
+  memset(&decoded, 0, sizeof(decoded));
+  lgNetReaderInit(&reader, data, size);
+  if (!lgNetReaderU16(&reader, &decoded.flags) ||
+      !lgNetReaderU16(&reader, &decoded.count))
+    return LG_NET_PARSE_INVALID_VALUE;
+  if (decoded.count > LG_NET_VIDEO_MAX_DAMAGE_RECTS)
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  const size_t wireSize = lgNetVideoDamageSize(&decoded);
+  if (size < wireSize)
+    return LG_NET_PARSE_TRUNCATED;
+
+  for (uint16_t i = 0; i < decoded.count; ++i)
+  {
+    LGNetVideoDamageRect * rect = &decoded.rects[i];
+    if (!lgNetReaderU16(&reader, &rect->x)     ||
+        !lgNetReaderU16(&reader, &rect->y)     ||
+        !lgNetReaderU16(&reader, &rect->width) ||
+        !lgNetReaderU16(&reader, &rect->height))
+      return LG_NET_PARSE_INVALID_VALUE;
+  }
+
+  if (!lgNetReaderValid(&reader) || lgNetReaderConsumed(&reader) != wireSize)
+    return LG_NET_PARSE_INVALID_LENGTH;
+  if (!lgNetVideoDamageValid(&decoded, frameWidth, frameHeight))
+    return LG_NET_PARSE_INVALID_VALUE;
+
+  *damage   = decoded;
+  *consumed = wireSize;
+  return LG_NET_PARSE_OK;
+}
+
 size_t lgNetVideoFrameUpdateSize(const LGNetVideoFrameUpdate * update)
 {
   size_t size;
