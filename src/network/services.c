@@ -82,7 +82,9 @@ static const LGNetAudioFormatFlags AUDIO_FORMAT_FLAGS =
 static const LGNetAudioDataFlags AUDIO_DATA_FLAGS =
   LG_NET_AUDIO_DATA_DISCONTINUITY |
   LG_NET_AUDIO_DATA_SILENT        |
-  LG_NET_AUDIO_DATA_END_OF_STREAM;
+  LG_NET_AUDIO_DATA_END_OF_STREAM |
+  LG_NET_AUDIO_DATA_CLOCK_VALID   |
+  LG_NET_AUDIO_DATA_CLOCK_STABLE;
 
 static const LGNetAudioStateFlags AUDIO_STATE_FLAGS =
   LG_NET_AUDIO_STATE_MUTED |
@@ -3495,8 +3497,15 @@ bool lgNetAudioDataValid(const LGNetAudioData * audio)
   return audio && audio->streamID &&
     audioDirectionKnown(audio->direction) &&
     !(audio->flags & ~AUDIO_DATA_FLAGS) && audio->formatEpoch &&
-    audio->packetID && audio->timestampNs && audio->frameCount &&
+    audio->packetID && audio->frameCount &&
     audio->frameCount <= LG_NET_AUDIO_MAX_PACKET_FRAMES &&
+    audio->startFrame <= UINT64_MAX - (audio->frameCount - 1U) &&
+    (!(audio->flags & LG_NET_AUDIO_DATA_CLOCK_STABLE) ||
+      (audio->flags & LG_NET_AUDIO_DATA_CLOCK_VALID)) &&
+    ((audio->flags & LG_NET_AUDIO_DATA_CLOCK_VALID) ?
+      audio->timestampNs && audio->timestampNs <= (uint64_t)INT64_MAX &&
+        audio->rateQ32 && audio->rateQ32 <= LG_NET_AUDIO_MAX_RATE_Q32 :
+      !audio->timestampNs && !audio->rateQ32) &&
     ((audio->flags & LG_NET_AUDIO_DATA_SILENT) ?
       !audio->dataLength && !audio->data : audio->dataLength && audio->data) &&
     lgNetAudioDataSize(audio) != 0;
@@ -3541,6 +3550,7 @@ bool lgNetAudioDataEncode(
     lgNetWriterU64(&writer, audio->packetID)       &&
     lgNetWriterU64(&writer, audio->timestampNs)    &&
     lgNetWriterU64(&writer, audio->startFrame)     &&
+    lgNetWriterU64(&writer, audio->rateQ32)        &&
     lgNetWriterU32(&writer, audio->frameCount)     &&
     lgNetWriterU32(&writer, audio->dataLength)     &&
     lgNetWriterBytes(&writer, audio->data, audio->dataLength) &&
@@ -3567,6 +3577,7 @@ LGNetParseResult lgNetAudioDataDecode(
       !lgNetReaderU64(&reader, &decoded.packetID)    ||
       !lgNetReaderU64(&reader, &decoded.timestampNs) ||
       !lgNetReaderU64(&reader, &decoded.startFrame)  ||
+      !lgNetReaderU64(&reader, &decoded.rateQ32)     ||
       !lgNetReaderU32(&reader, &decoded.frameCount)  ||
       !lgNetReaderU32(&reader, &decoded.dataLength))
     return LG_NET_PARSE_INVALID_VALUE;

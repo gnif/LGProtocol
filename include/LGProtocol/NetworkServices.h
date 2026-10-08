@@ -124,7 +124,7 @@ extern "C" {
 #define LG_NET_AUDIO_MAX_PACKET_FRAMES            16384U
 #define LG_NET_AUDIO_MAX_DATA_LENGTH              (4U * 1024U * 1024U)
 #define LG_NET_AUDIO_FORMAT_WIRE_SIZE             40U
-#define LG_NET_AUDIO_DATA_HEADER_WIRE_SIZE        48U
+#define LG_NET_AUDIO_DATA_HEADER_WIRE_SIZE        56U
 #define LG_NET_AUDIO_STATE_WIRE_SIZE              32U
 #define LG_NET_AUDIO_CLOCK_FEEDBACK_WIRE_SIZE     48U
 #define LG_NET_AUDIO_SUBSCRIPTION_GRANT_WIRE_SIZE 40U
@@ -1363,8 +1363,16 @@ enum
   LG_NET_AUDIO_DATA_DISCONTINUITY = 1U << 0,
   LG_NET_AUDIO_DATA_SILENT        = 1U << 1,
   LG_NET_AUDIO_DATA_END_OF_STREAM = 1U << 2,
+  LG_NET_AUDIO_DATA_CLOCK_VALID   = 1U << 3,
+  LG_NET_AUDIO_DATA_CLOCK_STABLE  = 1U << 4,
 };
 
+/* LG_NET_AUDIO_MESSAGE_PLAYBACK_DATA and CAPTURE_DATA. startFrame is the
+ * first frame in the packet. When CLOCK_VALID is set, timestampNs and rateQ32
+ * form an atomic clock sample at startFrame; the timestamp is a positive
+ * signed monotonic timestamp and the rate is unsigned 32.32 frames per
+ * second. Without CLOCK_VALID, timestampNs and rateQ32 are zero.
+ * CLOCK_STABLE requires CLOCK_VALID. */
 typedef struct LGNetAudioData
 {
   uint32_t            streamID;
@@ -1374,6 +1382,7 @@ typedef struct LGNetAudioData
   uint64_t            packetID;
   uint64_t            timestampNs;
   uint64_t            startFrame;
+  uint64_t            rateQ32;
   uint32_t            frameCount;
   uint32_t            dataLength;
   const uint8_t *     data;
